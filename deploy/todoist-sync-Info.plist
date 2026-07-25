@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.todoist-sync.app</string>
+    <key>CFBundleName</key>
+    <string>Todoist Sync</string>
+    <key>CFBundleExecutable</key>
+    <string>todoist-sync</string>
+    <key>CFBundleIconFile</key>
+    <string>todoist-sync</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSRemindersFullAccessUsageDescription</key>
+    <string>Todoist Sync reads and writes your Reminders lists to keep them in sync with Todoist.</string>
+</dict>
+</plist>

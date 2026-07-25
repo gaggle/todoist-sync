@@ -7,7 +7,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>__PROJECT_ROOT__/deploy/todoist-sync</string>
+        <string>__PROJECT_ROOT__/deploy/todoist-sync.app/Contents/MacOS/todoist-sync</string>
     </array>
 
     <key>WorkingDirectory</key>

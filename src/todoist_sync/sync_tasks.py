@@ -25,13 +25,14 @@ from .config import (
     PRUNE_MISSING_AFTER_CHECKS,
     REMINDERS_ACCESS_MARKER,
     STATE_PATH,
+    SYNC_FAILURE_MARKER,
     TODOIST_API_KEY,
 )
 from .reminders_bridge import RemindersBridge, RemindersUnavailableError
 from .todoist_bridge import TodoistBridge
 
 _NOTIFY_THROTTLE = timedelta(hours=1)
-_FAILURE_MARKERS = (NETWORK_DOWN_MARKER, AUTH_FAILURE_MARKER, REMINDERS_ACCESS_MARKER)
+_FAILURE_MARKERS = (NETWORK_DOWN_MARKER, AUTH_FAILURE_MARKER, REMINDERS_ACCESS_MARKER, SYNC_FAILURE_MARKER)
 
 _MAX_LOG_BYTES = 1_000_000  # 1 MB per file
 _LOG_BACKUP_COUNT = 3
@@ -575,6 +576,11 @@ if __name__ == "__main__":
             # echoed back in a validation error doesn't flood the log.
             body = e.response.text[:200]
             log.warning("Sync failed: HTTP %d — %s", e.response.status_code, body)
+            _notify_once(
+                SYNC_FAILURE_MARKER,
+                "Todoist Sync",
+                f"Sync failed: Todoist returned HTTP {e.response.status_code}.",
+            )
         sys.exit(1)
     except RemindersUnavailableError as e:
         log.warning("Sync failed: %s", e)
@@ -582,6 +588,7 @@ if __name__ == "__main__":
         sys.exit(1)
     except Exception:
         log.exception("Sync failed")
+        _notify_once(SYNC_FAILURE_MARKER, "Todoist Sync", "Sync failed unexpectedly — check the log.")
         sys.exit(1)
     finally:
         lock_file.close()

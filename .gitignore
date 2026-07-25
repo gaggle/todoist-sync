@@ -6,5 +6,6 @@ config.env
 var/
 *.egg-info/
 **/.build/
+deploy/todoist-sync.app/
 .pytest_cache/
 .ruff_cache/

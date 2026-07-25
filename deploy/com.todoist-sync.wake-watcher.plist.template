@@ -7,8 +7,8 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>__PROJECT_ROOT__/swift/wake-watcher/.build/release/wake-watcher</string>
-        <string>__PROJECT_ROOT__/deploy/todoist-sync</string>
+        <string>__PROJECT_ROOT__/deploy/todoist-sync.app/Contents/MacOS/wake-watcher</string>
+        <string>__SYNC_LABEL__</string>
     </array>
 
     <key>WorkingDirectory</key>

@@ -26,6 +26,7 @@ case "${1:-}" in
         rm -f "$PLIST_PATH"
         launchctl unload "$WAKE_PLIST_PATH" 2>/dev/null || true
         rm -f "$WAKE_PLIST_PATH"
+        rm -rf "$PROJECT_ROOT/deploy/todoist-sync.app"
         echo "Uninstalled: $LABEL, $WAKE_LABEL"
         exit 0
         ;;
@@ -101,10 +102,30 @@ codesign -s - "$PROJECT_ROOT/swift/reminders-bridge/.build/release/reminders-bri
 
 echo "Building wake-watcher (Swift/NSWorkspace helper)..."
 (cd "$PROJECT_ROOT/swift/wake-watcher" && swift build -c release)
-codesign -s - "$PROJECT_ROOT/swift/wake-watcher/.build/release/wake-watcher" 2>/dev/null || true
 
 chmod +x "$PROJECT_ROOT/deploy/todoist-sync"
-codesign -s - "$PROJECT_ROOT/deploy/todoist-sync" 2>/dev/null || true
+
+# Both the periodic sync wrapper and wake-watcher are bundled as two
+# executables inside one Todoist Sync.app, sharing a single Info.plist
+# identity, rather than as bare binaries or two separate .apps. wake-watcher
+# no longer touches Reminders itself (it just asks launchd to run the sync
+# job below on demand — see main.swift), so it doesn't need its own
+# identity; folding it into the same bundle as the sync tool means macOS's
+# Login Items list and the Reminders-access TCC prompt both consistently
+# show one thing: "Todoist Sync". Rebuilt fresh on every install since
+# ad-hoc signing ties the TCC grant to the binary's content hash anyway —
+# a stable bundle ID doesn't avoid re-prompting after a code change, it
+# just makes the prompt itself clearer.
+SYNC_APP="$PROJECT_ROOT/deploy/todoist-sync.app"
+rm -rf "$SYNC_APP"
+mkdir -p "$SYNC_APP/Contents/MacOS" "$SYNC_APP/Contents/Resources"
+cp "$PROJECT_ROOT/deploy/todoist-sync-Info.plist" "$SYNC_APP/Contents/Info.plist"
+cp "$PROJECT_ROOT/deploy/todoist-sync.icns" "$SYNC_APP/Contents/Resources/todoist-sync.icns"
+sed -e "s@__PROJECT_ROOT__@$PROJECT_ROOT@g" \
+    "$PROJECT_ROOT/deploy/todoist-sync" > "$SYNC_APP/Contents/MacOS/todoist-sync"
+chmod +x "$SYNC_APP/Contents/MacOS/todoist-sync"
+cp "$PROJECT_ROOT/swift/wake-watcher/.build/release/wake-watcher" "$SYNC_APP/Contents/MacOS/wake-watcher"
+codesign -s - --force "$SYNC_APP" 2>/dev/null || true
 
 mkdir -p "$PROJECT_ROOT/var"
 
@@ -118,11 +139,14 @@ launchctl load "$PLIST_PATH"
 
 # Wake trigger: StartInterval alone only catches up some time after the Mac
 # wakes, not immediately. wake-watcher is a small always-running LaunchAgent
-# that observes NSWorkspace.didWakeNotification and fires a sync ~10s after
-# wake, so pair it with the timer above rather than replacing it.
+# that observes NSWorkspace.didWakeNotification and, once the network is
+# back, asks launchd to run the timer job above on demand (rather than
+# spawning the sync itself) — see main.swift for why that matters for TCC
+# attribution.
 sed \
     -e "s@__PROJECT_ROOT__@$PROJECT_ROOT@g" \
     -e "s@__LABEL__@$WAKE_LABEL@g" \
+    -e "s@__SYNC_LABEL__@$LABEL@g" \
     "$PROJECT_ROOT/deploy/com.todoist-sync.wake-watcher.plist.template" > "$WAKE_PLIST_PATH"
 
 launchctl unload "$WAKE_PLIST_PATH" 2>/dev/null || true

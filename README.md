@@ -145,14 +145,26 @@ call, which value won a conflict and why, and which specific pair was
 archived or pruned — useful when troubleshooting, noisy to leave on
 permanently.
 
-The agent points at `deploy/todoist-sync`, a small wrapper script, rather
-than the venv's Python binary directly — otherwise macOS's Login Items list
-shows the background item as "Python" instead of something recognizable.
-Both that script and the compiled Swift binaries are ad-hoc code-signed
+The two LaunchAgents (the 15-minute timer and the wake-watcher, see below)
+both point into `deploy/todoist-sync.app`, a minimal `.app` bundle
+containing two executables — the sync wrapper script and the wake-watcher
+binary — that share one bundle identity. Wrapping them (rather than
+pointing launchd at the venv's Python binary and the bare Swift binary
+directly) means macOS's Login Items list and the Reminders-access
+permission prompt both consistently show "Todoist Sync" — it's the process
+that actually reads/writes Reminders (via the reminders-bridge subprocess
+it launches), so it's the one macOS should ask permission for. Notably,
+wake-watcher itself never touches Reminders: rather than syncing directly,
+it asks launchd to run the timer job on demand (`launchctl start`), so
+launchd — not wake-watcher — is the parent of that run either way, and both
+trigger paths get identical, correct attribution.
+
+This bundle and the compiled Swift binaries are ad-hoc code-signed
 (`codesign -s -`) to clear the "unidentified developer" warning macOS shows
 for unsigned executables running as background items; that's a local-only
 signature, not tied to an Apple Developer ID, and needs re-running after
-any edit (the installer does this automatically).
+any edit (the installer does this automatically, and rebuilding does mean
+macOS will ask you to re-approve Reminders access once).
 
 ```bash
 ./deploy/install.sh              # build, sign, install, and load
@@ -171,9 +183,16 @@ launchd's `StartInterval` timer doesn't fire while the Mac is asleep, and
 its wake catch-up isn't prompt — it can be several minutes after wake before
 a missed run fires. To close that gap, the installer also builds and loads
 a second, always-running LaunchAgent, `wake-watcher`
-(`swift/wake-watcher/`), which observes `NSWorkspace.didWakeNotification`
-and fires a sync ~10 seconds after every wake — a delay to give Wi-Fi a
-moment to reconnect first. It runs alongside the 15-minute timer rather
-than replacing it, has no external dependency (no Homebrew, no
-third-party app), and is uninstalled/reinstalled together with the main
-agent by `deploy/install.sh`.
+(`swift/wake-watcher/`), which observes `NSWorkspace.didWakeNotification`.
+Firing a sync immediately on wake reliably races Wi-Fi reassociation, so
+rather than guessing a fixed delay, it polls actual DNS resolution of
+`api.todoist.com` (`getaddrinfo`) once a second and fires as soon as that
+resolves — typically much faster than a fixed delay when the network's
+already up, capped at 30 seconds so a slow/failed reconnect doesn't block
+it forever (that case just fails and self-heals on the next 15-minute
+timer run). Rather than spawning the sync itself, it asks launchd to run
+the timer job on demand (`launchctl start com.todoist-sync.local`) — see
+the bundling note above for why that matters. It runs alongside the
+15-minute timer rather than replacing it, has no external dependency (no
+Homebrew, no third-party app), and is uninstalled/reinstalled together
+with the main agent by `deploy/install.sh`.
