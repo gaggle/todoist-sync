@@ -8,11 +8,19 @@
 #   ./deploy/install.sh --update     pull latest code from git; run again afterward to rebuild/reload
 #   ./deploy/install.sh --upgrade    explicit alias for the default install/reload path
 #   ./deploy/install.sh --uninstall  unload and remove
+#   ./deploy/install.sh --ensurepath  add ~/.local/bin to your shell's PATH
+#   ./deploy/install.sh --ensurepath --all-shells  add to all detected shells
 #
 # --update and --upgrade are deliberately separate: --update only ever pulls
 # code, it never touches requirements.txt's pinned dependency versions —
 # those are pinned on purpose and only change when someone edits the file
 # by hand.
+#
+# --ensurepath modifies shell config files (~/.zshrc, ~/.bash_profile,
+# ~/.config/fish/config.fish) to add ~/.local/bin to PATH. By default it
+# targets only the login shell ($SHELL); --all-shells targets every shell
+# whose config file exists (or creates one if missing). Idempotent via a
+# marker comment so it's safe to re-run.
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,6 +31,82 @@ WAKE_PLIST_PATH="$HOME/Library/LaunchAgents/${WAKE_LABEL}.plist"
 
 RUN_SETUP=0
 case "${1:-}" in
+    --ensurepath)
+        LOCAL_BIN="$HOME/.local/bin"
+        ALL_SHELLS=0
+        if [ "${2:-}" = "--all-shells" ]; then
+            ALL_SHELLS=1
+        fi
+
+        # Check if already on PATH
+        case ":$PATH:" in
+            *":$LOCAL_BIN:"*)
+                echo "$LOCAL_BIN is already on your PATH."
+                exit 0
+                ;;
+        esac
+
+        MARKER="# Added by todoist-sync install.sh"
+        ADDED=0
+
+        add_to_config() {
+            local config_file="$1" line="$2" shell_label="$3"
+            if [ -f "$config_file" ] && grep -qF "$MARKER" "$config_file" 2>/dev/null; then
+                echo "  $shell_label: already in $config_file — skipping."
+                return 0
+            fi
+            mkdir -p "$(dirname "$config_file")"
+            {
+                echo ""
+                echo "$MARKER"
+                echo "$line"
+            } >> "$config_file"
+            echo "  $shell_label: added to $config_file"
+            ADDED=1
+        }
+
+        echo "Adding $LOCAL_BIN to PATH..."
+
+        if [ "$ALL_SHELLS" = "1" ]; then
+            add_to_config "$HOME/.config/fish/config.fish" \
+                "fish_add_path $LOCAL_BIN" "fish"
+            add_to_config "$HOME/.zshrc" \
+                "export PATH=\"$LOCAL_BIN:\$PATH\"" "zsh"
+            add_to_config "$HOME/.bash_profile" \
+                "export PATH=\"$LOCAL_BIN:\$PATH\"" "bash"
+        else
+            case "$SHELL" in
+                */fish)
+                    add_to_config "$HOME/.config/fish/config.fish" \
+                        "fish_add_path $LOCAL_BIN" "fish"
+                    ;;
+                */zsh)
+                    add_to_config "$HOME/.zshrc" \
+                        "export PATH=\"$LOCAL_BIN:\$PATH\"" "zsh"
+                    ;;
+                */bash)
+                    add_to_config "$HOME/.bash_profile" \
+                        "export PATH=\"$LOCAL_BIN:\$PATH\"" "bash"
+                    ;;
+                *)
+                    echo "Unknown shell: $SHELL" >&2
+                    echo "Try: $0 --ensurepath --all-shells" >&2
+                    echo "Or add $LOCAL_BIN to your shell's PATH manually." >&2
+                    exit 1
+                    ;;
+            esac
+        fi
+
+        if [ "$ADDED" = "1" ]; then
+            echo
+            echo "Done! Open a new terminal or source your shell's config file"
+            echo "for the PATH change to take effect."
+        else
+            echo
+            echo "No changes needed."
+        fi
+        exit 0
+        ;;
     --uninstall)
         launchctl unload "$PLIST_PATH" 2>/dev/null || true
         rm -f "$PLIST_PATH"
@@ -50,7 +134,7 @@ case "${1:-}" in
         ;;
     *)
         echo "error: unknown argument '${1}'" >&2
-        echo "Usage: $0 [--setup|--update|--upgrade|--uninstall]" >&2
+        echo "Usage: $0 [--setup|--update|--upgrade|--ensurepath|--uninstall]" >&2
         exit 1
         ;;
 esac
@@ -216,31 +300,16 @@ ln -sf "$SYNC_APP/Contents/MacOS/todoist-sync" "$HOME/.local/bin/todoist-sync"
 case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
     *)
-        # Don't auto-modify shell config files — too invasive and fragile
-        # ($SHELL may not match the shell the user actually runs
-        # interactively). Instead, detect the login shell and print the
-        # exact command to copy-paste.
+        # Point the user at --ensurepath rather than printing raw
+        # shell-specific commands — it handles shell detection and
+        # config-file modification itself.
         echo "Note: $HOME/.local/bin isn't on your PATH yet — add it to run"
         echo "'todoist-sync' from anywhere."
         echo
-        case "$SHELL" in
-            */fish)
-                echo "  fish_add_path $HOME/.local/bin"
-                ;;
-            */zsh)
-                echo "  echo 'export PATH=\"$HOME/.local/bin:\$PATH\"' >> ~/.zshrc"
-                ;;
-            */bash)
-                # macOS bash reads .bash_profile for login shells and
-                # .bashrc for interactive non-login shells — .bash_profile
-                # is the safer single-file choice on macOS.
-                echo "  echo 'export PATH=\"$HOME/.local/bin:\$PATH\"' >> ~/.bash_profile"
-                ;;
-            *)
-                echo "  Add $HOME/.local/bin to your shell's PATH."
-                ;;
-        esac
-        echo "  Then start a new terminal or source the file."
+        echo "  $0 --ensurepath"
+        echo "  (add --all-shells to modify all detected shells)"
+        echo
+        echo "  Then start a new terminal."
         ;;
 esac
 
