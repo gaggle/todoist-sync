@@ -29,6 +29,7 @@ case "${1:-}" in
         launchctl unload "$WAKE_PLIST_PATH" 2>/dev/null || true
         rm -f "$WAKE_PLIST_PATH"
         rm -rf "$PROJECT_ROOT/deploy/todoist-sync.app"
+        rm -f "$HOME/.local/bin/todoist-sync"
         echo "Uninstalled: $LABEL, $WAKE_LABEL"
         exit 0
         ;;
@@ -207,6 +208,19 @@ chmod +x "$SYNC_APP/Contents/MacOS/todoist-sync"
 cp "$PROJECT_ROOT/swift/wake-watcher/.build/release/wake-watcher" "$SYNC_APP/Contents/MacOS/wake-watcher"
 codesign -s - --force "$SYNC_APP" 2>/dev/null || true
 
+# Symlink a `todoist-sync` command onto PATH for easy manual runs (live
+# console output, same as running the Python module directly) — points at
+# the bundled executable so it always reflects the latest install.
+mkdir -p "$HOME/.local/bin"
+ln -sf "$SYNC_APP/Contents/MacOS/todoist-sync" "$HOME/.local/bin/todoist-sync"
+case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *)
+        echo "Note: $HOME/.local/bin isn't on your PATH yet — add it to run"
+        echo "'todoist-sync' from anywhere (e.g. fish: fish_add_path $HOME/.local/bin)."
+        ;;
+esac
+
 mkdir -p "$PROJECT_ROOT/var"
 
 sed \
@@ -235,6 +249,7 @@ launchctl load "$WAKE_PLIST_PATH"
 echo "Installed and loaded: $LABEL (runs every 15 minutes)"
 echo "Installed and loaded: $WAKE_LABEL (syncs ~10s after wake from sleep)"
 echo "Logs: $PROJECT_ROOT/var/sync.log"
+echo "Run a sync manually anytime with: todoist-sync"
 echo "To uninstall: ./deploy/install.sh --uninstall"
 echo
 echo "Note: the first sync run will prompt macOS for Reminders access —"

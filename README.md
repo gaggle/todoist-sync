@@ -123,6 +123,16 @@ System Settings > Privacy & Security > Reminders.
 
 ## Running
 
+The installer symlinks a `todoist-sync` command onto `~/.local/bin` (and
+prints a note if that's not already on your PATH), so a manual run from
+anywhere is just:
+
+```bash
+todoist-sync
+```
+
+Equivalent, if you'd rather not rely on PATH:
+
 ```bash
 ./.venv/bin/python -m todoist_sync.sync_tasks
 ```
