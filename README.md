@@ -100,18 +100,23 @@ var/                       generated at runtime — state.json, sync.log
 ## Setup
 
 ```bash
-cp config.env.example config.env
-# edit config.env and set TODOIST_API_KEY
-# (Todoist -> Settings -> Integrations -> Developer)
-
 ./deploy/install.sh
 ```
 
 `deploy/install.sh` creates `.venv` if needed, installs the Python
 dependencies, builds the Swift helpers, and loads the LaunchAgents. It
-requires `config.env` to already exist (see above) and Xcode Command Line
-Tools for the Swift build (`xcode-select --install` if `swift --version`
-doesn't work).
+requires Xcode Command Line Tools for the Swift build (`xcode-select
+--install` if `swift --version` doesn't work). Get a Todoist API token
+from Todoist -> Settings -> Integrations -> Developer first.
+
+No manual `config.env` editing needed: on first run (no `config.env` yet),
+the installer prompts interactively for the API token (stored in macOS
+Keychain, not the file) and every other setting — list name, conflict
+winner, archive/prune thresholds, log level — writing them into a fresh
+`config.env` for you. Re-run `./deploy/install.sh --setup` any time later
+to revisit those same prompts (each shows its current value as the
+default; press Enter to keep it). Hand-editing `config.env` directly still
+works too, if you'd rather do that.
 
 The first run will prompt macOS for Reminders access — grant it in
 System Settings > Privacy & Security > Reminders.
@@ -167,15 +172,17 @@ any edit (the installer does this automatically, and rebuilding does mean
 macOS will ask you to re-approve Reminders access once).
 
 ```bash
-./deploy/install.sh              # build, sign, install, and load
+./deploy/install.sh              # first run: interactive setup, then build, sign, install, and load
+./deploy/install.sh --setup      # revisit the interactive settings prompts, then reinstall
 ./deploy/install.sh --upgrade    # pull latest code, update deps, then build/sign/install/load
 ./deploy/install.sh --uninstall  # unload and remove
 ```
 
 Resolves paths automatically, so it works regardless of where the repo is
-cloned or which user runs it. Requires `.venv` and `config.env` to already
-be set up (see Setup, above). Safe to re-run. `--upgrade` refuses to run if
-there are uncommitted local changes, so it can't clobber in-progress edits.
+cloned or which user runs it. Creates `.venv` and `config.env` itself if
+they don't exist yet (see Setup, above). Safe to re-run. `--upgrade`
+refuses to run if there are uncommitted local changes, so it can't clobber
+in-progress edits.
 
 ### Sleep and wake
 

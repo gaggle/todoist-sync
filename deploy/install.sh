@@ -4,6 +4,7 @@
 #
 # Usage:
 #   ./deploy/install.sh              install and load (also the rebuild/reload step below)
+#   ./deploy/install.sh --setup      re-run the interactive settings prompts, then reinstall
 #   ./deploy/install.sh --update     pull latest code from git; run again afterward to rebuild/reload
 #   ./deploy/install.sh --upgrade    explicit alias for the default install/reload path
 #   ./deploy/install.sh --uninstall  unload and remove
@@ -20,6 +21,7 @@ PLIST_PATH="$HOME/Library/LaunchAgents/${LABEL}.plist"
 WAKE_LABEL="com.todoist-sync.wake-watcher.local"
 WAKE_PLIST_PATH="$HOME/Library/LaunchAgents/${WAKE_LABEL}.plist"
 
+RUN_SETUP=0
 case "${1:-}" in
     --uninstall)
         launchctl unload "$PLIST_PATH" 2>/dev/null || true
@@ -40,11 +42,14 @@ case "${1:-}" in
         echo "Code updated. Run ./deploy/install.sh (or --upgrade) to rebuild and reload with it."
         exit 0
         ;;
+    --setup)
+        RUN_SETUP=1
+        ;;
     "" | --upgrade)
         ;;
     *)
         echo "error: unknown argument '${1}'" >&2
-        echo "Usage: $0 [--update|--upgrade|--uninstall]" >&2
+        echo "Usage: $0 [--setup|--update|--upgrade|--uninstall]" >&2
         exit 1
         ;;
 esac
@@ -54,12 +59,25 @@ if [ ! -x "$PROJECT_ROOT/.venv/bin/python" ]; then
     python3 -m venv "$PROJECT_ROOT/.venv"
 fi
 
+FIRST_INSTALL=0
+if [ ! -f "$PROJECT_ROOT/config.env" ]; then
+    FIRST_INSTALL=1
+fi
+
 # The Todoist API token is read from macOS Keychain at runtime (see
 # config.py).  config.env is still supported as a fallback — both for
 # non-macOS dev and for anyone who hasn't migrated yet.
 KEYCHAIN_TOKEN="$(security find-generic-password -s todoist-sync -a default -w 2>/dev/null || true)"
 
-if [ -z "$KEYCHAIN_TOKEN" ]; then
+if [ -n "$KEYCHAIN_TOKEN" ] && [ "$RUN_SETUP" = "1" ]; then
+    echo "A Todoist API token is already stored in Keychain."
+    read -r -s -p "Enter a new token to replace it, or press Enter to keep the current one: " NEW_TOKEN
+    echo
+    if [ -n "$NEW_TOKEN" ]; then
+        security add-generic-password -s todoist-sync -a default -w "$NEW_TOKEN" -U
+        echo "Token updated in macOS Keychain."
+    fi
+elif [ -z "$KEYCHAIN_TOKEN" ]; then
     if [ -f "$PROJECT_ROOT/config.env" ] && grep -q '^TODOIST_API_KEY=".' "$PROJECT_ROOT/config.env" 2>/dev/null; then
         # Migrate the existing token from config.env into Keychain.
         TOKEN="$(grep '^TODOIST_API_KEY=' "$PROJECT_ROOT/config.env" | sed 's/^TODOIST_API_KEY="\(.*\)"$/\1/')"
@@ -84,6 +102,52 @@ fi
 if [ ! -f "$PROJECT_ROOT/config.env" ]; then
     echo "Copying config.env.example to config.env (for non-API settings)..."
     cp "$PROJECT_ROOT/config.env.example" "$PROJECT_ROOT/config.env"
+fi
+
+# The other settings are plain (non-secret) key/value pairs in config.env,
+# so rather than requiring anyone to hand-edit that file, prompt for them
+# interactively — on first install (there's nothing to default to yet
+# otherwise) and again any time someone runs --setup to revisit them.
+if [ "$FIRST_INSTALL" = "1" ] || [ "$RUN_SETUP" = "1" ]; then
+    echo
+    echo "Configure sync settings (press Enter to keep the current/default value):"
+
+    prompt_setting() {
+        local key="$1" prompt_text="$2" validate_re="$3"
+        local current input escaped tmp
+        current="$(grep "^${key}=" "$PROJECT_ROOT/config.env" | sed -E "s/^${key}=\"(.*)\"\$/\1/")"
+        while true; do
+            read -r -p "$prompt_text [$current]: " input
+            input="${input:-$current}"
+            if [ -z "$validate_re" ] || [[ "$input" =~ $validate_re ]]; then
+                break
+            fi
+            echo "  invalid value, try again." >&2
+        done
+        # Escape characters that are special in a sed replacement (the "@"
+        # delimiter itself, "&", and "\") so arbitrary input can't corrupt
+        # the substitution or the rest of the file.
+        escaped="$(printf '%s' "$input" | sed -e 's/[&\@]/\\&/g')"
+        tmp="$(mktemp)"
+        sed -E "s@^${key}=.*@${key}=\"${escaped}\"@" "$PROJECT_ROOT/config.env" > "$tmp"
+        mv "$tmp" "$PROJECT_ROOT/config.env"
+    }
+
+    prompt_setting SYNC_LIST_NAME \
+        "Reminders list / Todoist project name to sync" ""
+    prompt_setting SYNC_CONFLICT_WINNER \
+        "Conflict winner when both sides changed (reminders/todoist)" \
+        "^(reminders|todoist)$"
+    prompt_setting SYNC_ARCHIVE_AFTER_DAYS \
+        "Archive completed pairs after this many days" \
+        "^[0-9]+$"
+    prompt_setting SYNC_PRUNE_MISSING_AFTER_CHECKS \
+        "Drop pairs missing on one side after this many consecutive checks" \
+        "^[0-9]+$"
+    prompt_setting SYNC_LOG_LEVEL \
+        "Log level (DEBUG/INFO/WARNING/ERROR)" \
+        "^(DEBUG|INFO|WARNING|ERROR)$"
+    echo
 fi
 
 if ! command -v swift >/dev/null 2>&1; then
