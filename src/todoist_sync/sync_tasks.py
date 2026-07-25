@@ -572,10 +572,12 @@ if __name__ == "__main__":
             # HTTPStatusError's own message is just "<status> for url:
             # <url>" — the actual reason (validation error, rate limit
             # detail, etc.) is in the response body and would otherwise
-            # never reach the log. Truncate to 200 chars so any task content
-            # echoed back in a validation error doesn't flood the log.
-            body = e.response.text[:200]
-            log.warning("Sync failed: HTTP %d — %s", e.response.status_code, body)
+            # never reach the log. Log only the status code at WARNING
+            # (the default level) so personal task content echoed back in
+            # a validation error doesn't land in the routine log; the
+            # full body is available at DEBUG for troubleshooting.
+            log.warning("Sync failed: HTTP %d", e.response.status_code)
+            log.debug("Response body: %s", e.response.text[:200])
             _notify_once(
                 SYNC_FAILURE_MARKER,
                 "Todoist Sync",
