@@ -216,8 +216,31 @@ ln -sf "$SYNC_APP/Contents/MacOS/todoist-sync" "$HOME/.local/bin/todoist-sync"
 case ":$PATH:" in
     *":$HOME/.local/bin:"*) ;;
     *)
+        # Don't auto-modify shell config files — too invasive and fragile
+        # ($SHELL may not match the shell the user actually runs
+        # interactively). Instead, detect the login shell and print the
+        # exact command to copy-paste.
         echo "Note: $HOME/.local/bin isn't on your PATH yet — add it to run"
-        echo "'todoist-sync' from anywhere (e.g. fish: fish_add_path $HOME/.local/bin)."
+        echo "'todoist-sync' from anywhere."
+        echo
+        case "$SHELL" in
+            */fish)
+                echo "  fish_add_path $HOME/.local/bin"
+                ;;
+            */zsh)
+                echo "  echo 'export PATH=\"$HOME/.local/bin:\$PATH\"' >> ~/.zshrc"
+                ;;
+            */bash)
+                # macOS bash reads .bash_profile for login shells and
+                # .bashrc for interactive non-login shells — .bash_profile
+                # is the safer single-file choice on macOS.
+                echo "  echo 'export PATH=\"$HOME/.local/bin:\$PATH\"' >> ~/.bash_profile"
+                ;;
+            *)
+                echo "  Add $HOME/.local/bin to your shell's PATH."
+                ;;
+        esac
+        echo "  Then start a new terminal or source the file."
         ;;
 esac
 
