@@ -30,7 +30,7 @@ let reachabilityTarget = "api.todoist.com"
 let postWakeMaxWaitSeconds = 30.0
 let reachabilityPollIntervalSeconds = 1.0
 
-func canResolve(host: String) -> Bool {
+@Sendable func canResolve(host: String) -> Bool {
     var hints = addrinfo(
         ai_flags: 0, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM, ai_protocol: 0,
         ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil
@@ -50,7 +50,7 @@ func canResolve(host: String) -> Bool {
 // "wake-watcher" instead of the sync tool itself. Going through launchd
 // makes launchd the direct parent either way, so wake-triggered and
 // timer-triggered runs get identical, correct attribution.
-func runSync() {
+@Sendable func runSync() {
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
     task.arguments = ["start", syncJobLabel]
