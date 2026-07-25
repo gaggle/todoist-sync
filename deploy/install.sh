@@ -64,6 +64,22 @@ if [ ! -f "$PROJECT_ROOT/config.env" ]; then
     FIRST_INSTALL=1
 fi
 
+# `read` returns non-zero on EOF (stdin ran out of input, e.g. a closed or
+# already-drained pipe) — under `set -e` that would otherwise kill the
+# whole script silently the moment it happens, with no indication of why.
+# Wrap every interactive read in this so it fails with a clear message
+# instead. Piped input with actual data (scripted/automated setup) still
+# works fine either way; this only fires when there's truly nothing left
+# to read.
+require_read() {
+    if ! read "$@"; then
+        echo >&2
+        echo "error: no input available for a required prompt — run this in an" >&2
+        echo "interactive terminal (or pipe in enough answers if scripting it)." >&2
+        exit 1
+    fi
+}
+
 # The Todoist API token is read from macOS Keychain at runtime (see
 # config.py).  config.env is still supported as a fallback — both for
 # non-macOS dev and for anyone who hasn't migrated yet.
@@ -71,7 +87,7 @@ KEYCHAIN_TOKEN="$(security find-generic-password -s todoist-sync -a default -w 2
 
 if [ -n "$KEYCHAIN_TOKEN" ] && [ "$RUN_SETUP" = "1" ]; then
     echo "A Todoist API token is already stored in Keychain."
-    read -r -s -p "Enter a new token to replace it, or press Enter to keep the current one: " NEW_TOKEN
+    require_read -r -s -p "Enter a new token to replace it, or press Enter to keep the current one: " NEW_TOKEN
     echo
     if [ -n "$NEW_TOKEN" ]; then
         security add-generic-password -s todoist-sync -a default -w "$NEW_TOKEN" -U
@@ -89,7 +105,7 @@ elif [ -z "$KEYCHAIN_TOKEN" ]; then
     else
         echo "No Todoist API token found in Keychain or config.env."
         echo "Enter your Todoist API token (input hidden):"
-        read -s TOKEN
+        require_read -s TOKEN
         if [ -z "$TOKEN" ]; then
             echo "error: no token entered." >&2
             exit 1
@@ -117,7 +133,7 @@ if [ "$FIRST_INSTALL" = "1" ] || [ "$RUN_SETUP" = "1" ]; then
         local current input escaped tmp
         current="$(grep "^${key}=" "$PROJECT_ROOT/config.env" | sed -E "s/^${key}=\"(.*)\"\$/\1/")"
         while true; do
-            read -r -p "$prompt_text [$current]: " input
+            require_read -r -p "$prompt_text [$current]: " input
             input="${input:-$current}"
             if [ -z "$validate_re" ] || [[ "$input" =~ $validate_re ]]; then
                 break
