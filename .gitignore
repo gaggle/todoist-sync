@@ -9,3 +9,4 @@ var/
 deploy/todoist-sync.app/
 .pytest_cache/
 .ruff_cache/
+.claude/
