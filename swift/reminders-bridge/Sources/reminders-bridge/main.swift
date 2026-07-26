@@ -146,13 +146,50 @@ func printJSON<T: Encodable>(_ value: T) {
     print(String(data: data, encoding: .utf8)!)
 }
 
-func opt(_ args: [String], _ name: String) -> String? {
-    guard let idx = args.firstIndex(of: "--\(name)"), idx + 1 < args.count else { return nil }
-    return args[idx + 1]
-}
+// Options are parsed by walking argv in strict `--key value` pairs rather
+// than by scanning the whole array for a matching `--key`. A scan treats
+// every element as a potential option name, including the ones that are
+// really values — so a reminder titled "--all-day" or "--body" (titles and
+// notes come from Todoist, i.e. outside this program's control) would be
+// re-read as an option and silently change how the rest of the command
+// parsed. Consuming each value positionally means a value is never
+// inspected as a key, whatever it happens to contain.
+//
+// Names in `flagNames` take no value; everything else consumes the next
+// element. First occurrence wins, so an option can't be redefined later in
+// the line either.
+struct ParsedArgs {
+    private let values: [String: String]
+    private let flags: Set<String>
 
-func flag(_ args: [String], _ name: String) -> Bool {
-    args.contains("--\(name)")
+    static let flagNames: Set<String> = ["all-day"]
+
+    init(_ args: [String]) {
+        var values: [String: String] = [:]
+        var flags: Set<String> = []
+        var i = 0
+        while i < args.count {
+            guard args[i].hasPrefix("--") else {
+                i += 1
+                continue
+            }
+            let name = String(args[i].dropFirst(2))
+            if ParsedArgs.flagNames.contains(name) {
+                flags.insert(name)
+                i += 1
+            } else if i + 1 < args.count {
+                if values[name] == nil { values[name] = args[i + 1] }
+                i += 2
+            } else {
+                i += 1
+            }
+        }
+        self.values = values
+        self.flags = flags
+    }
+
+    func opt(_ name: String) -> String? { values[name] }
+    func flag(_ name: String) -> Bool { flags.contains(name) }
 }
 
 guard requestAccess() else {
@@ -166,17 +203,18 @@ guard let command = args.first else {
     exit(1)
 }
 let rest = Array(args.dropFirst())
+let opts = ParsedArgs(rest)
 
 switch command {
 case "get-reminders":
-    guard let listName = opt(rest, "list"), let cal = findCalendar(named: listName, createIfMissing: true) else {
+    guard let listName = opts.opt("list"), let cal = findCalendar(named: listName, createIfMissing: true) else {
         print("[]")
         break
     }
     printJSON(fetchReminders(in: cal).map(toJSON))
 
 case "get-reminder":
-    guard let listName = opt(rest, "list"), let id = opt(rest, "id"),
+    guard let listName = opts.opt("list"), let id = opts.opt("id"),
           let item = findReminder(id: id, inList: listName)
     else {
         print("null")
@@ -185,15 +223,15 @@ case "get-reminder":
     printJSON(toJSON(item))
 
 case "create-reminder":
-    guard let listName = opt(rest, "list"), let cal = findCalendar(named: listName, createIfMissing: true) else {
+    guard let listName = opts.opt("list"), let cal = findCalendar(named: listName, createIfMissing: true) else {
         eprint("list not found/creatable")
         exit(1)
     }
     let reminder = EKReminder(eventStore: store)
     reminder.calendar = cal
-    reminder.title = opt(rest, "name") ?? ""
-    reminder.notes = opt(rest, "body") ?? ""
-    if let dueStr = opt(rest, "due"), let comps = dueDateComponents(fromWire: dueStr, allDay: flag(rest, "all-day")) {
+    reminder.title = opts.opt("name") ?? ""
+    reminder.notes = opts.opt("body") ?? ""
+    if let dueStr = opts.opt("due"), let comps = dueDateComponents(fromWire: dueStr, allDay: opts.flag("all-day")) {
         reminder.dueDateComponents = comps
     }
     do {
@@ -205,13 +243,13 @@ case "create-reminder":
     }
 
 case "set-body":
-    guard let listName = opt(rest, "list"), let id = opt(rest, "id"),
+    guard let listName = opts.opt("list"), let id = opts.opt("id"),
           let item = findReminder(id: id, inList: listName)
     else {
         printJSON(["ok": false])
         break
     }
-    item.notes = opt(rest, "body") ?? ""
+    item.notes = opts.opt("body") ?? ""
     do {
         try store.save(item, commit: true)
         printJSON(["ok": true])
@@ -221,13 +259,13 @@ case "set-body":
     }
 
 case "set-name":
-    guard let listName = opt(rest, "list"), let id = opt(rest, "id"),
+    guard let listName = opts.opt("list"), let id = opts.opt("id"),
           let item = findReminder(id: id, inList: listName)
     else {
         printJSON(["ok": false])
         break
     }
-    item.title = opt(rest, "name") ?? ""
+    item.title = opts.opt("name") ?? ""
     do {
         try store.save(item, commit: true)
         printJSON(["ok": true])
@@ -237,7 +275,7 @@ case "set-name":
     }
 
 case "complete":
-    guard let listName = opt(rest, "list"), let id = opt(rest, "id"),
+    guard let listName = opts.opt("list"), let id = opts.opt("id"),
           let item = findReminder(id: id, inList: listName)
     else {
         printJSON(["ok": false])
@@ -253,7 +291,7 @@ case "complete":
     }
 
 case "uncomplete":
-    guard let listName = opt(rest, "list"), let id = opt(rest, "id"),
+    guard let listName = opts.opt("list"), let id = opts.opt("id"),
           let item = findReminder(id: id, inList: listName)
     else {
         printJSON(["ok": false])
@@ -269,9 +307,9 @@ case "uncomplete":
     }
 
 case "set-due":
-    guard let listName = opt(rest, "list"), let id = opt(rest, "id"),
+    guard let listName = opts.opt("list"), let id = opts.opt("id"),
           let item = findReminder(id: id, inList: listName),
-          let dueStr = opt(rest, "due"), let comps = dueDateComponents(fromWire: dueStr, allDay: flag(rest, "all-day"))
+          let dueStr = opts.opt("due"), let comps = dueDateComponents(fromWire: dueStr, allDay: opts.flag("all-day"))
     else {
         printJSON(["ok": false])
         break

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from urllib.parse import quote
 
 import httpx
 from todoist_api_python.api import TodoistAPI
@@ -45,9 +46,16 @@ class TodoistBridge:
         # Scoped to project_id so a tampered or stale state.json entry
         # can't read/mutate a task outside the intended project — mirrors
         # the same confinement RemindersBridge applies via list_name.
+        # task_id is percent-encoded with nothing left safe, so it can only
+        # ever be a single path segment. Interpolated raw, a tampered or
+        # stale state.json entry like "../../../sync" resolves to a
+        # different endpoint on the same host — with our bearer token
+        # attached. (httpx doesn't follow redirects by default, so the
+        # token can't reach another host either way.)
         try:
             response = self._client.get(
-                f"{_TASKS_URL}/{task_id}", headers={"Authorization": f"Bearer {self._token}"}
+                f"{_TASKS_URL}/{quote(task_id, safe='')}",
+                headers={"Authorization": f"Bearer {self._token}"},
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as e:

@@ -82,7 +82,9 @@ def _notify_macos(title: str, message: str) -> None:
         return s.replace("\\", "\\\\").replace('"', '\\"')
 
     script = f'display notification "{_escape(message)}" with title "{_escape(title)}"'
-    subprocess.run(["osascript", "-e", script], check=False)
+    # Absolute path rather than $PATH lookup — same reasoning as
+    # config._SECURITY_BIN.
+    subprocess.run(["/usr/bin/osascript", "-e", script], check=False)
 
 
 def _notify_once(marker: Path, title: str, message: str) -> None:

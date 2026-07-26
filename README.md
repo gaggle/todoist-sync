@@ -118,6 +118,12 @@ to revisit those same prompts (each shows its current value as the
 default; press Enter to keep it). Hand-editing `config.env` directly still
 works too, if you'd rather do that.
 
+If you're upgrading from a version that kept `TODOIST_API_KEY` in
+`config.env`, the installer moves it into the Keychain and removes the
+plaintext line from the file, replacing it with a comment. Retrieve the
+token afterwards with `security find-generic-password -s todoist-sync -a
+default -w`.
+
 The first run will prompt macOS for Reminders access — grant it in
 System Settings > Privacy & Security > Reminders.
 

@@ -18,6 +18,13 @@ if ENV_PATH.exists():
 _KEYCHAIN_SERVICE = "todoist-sync"
 _KEYCHAIN_ACCOUNT = "default"
 
+# Absolute path, not a bare "security" resolved through $PATH. launchd runs
+# this with a safe default $PATH, but a manual run via the ~/.local/bin
+# symlink inherits the user's — and install.sh --ensurepath deliberately
+# prepends that user-writable directory ahead of /usr/bin. A file named
+# "security" landing there would otherwise intercept the token read.
+_SECURITY_BIN = "/usr/bin/security"
+
 
 def _load_from_keychain() -> str | None:
     """Read the Todoist API token from the macOS Keychain.
@@ -29,7 +36,7 @@ def _load_from_keychain() -> str | None:
     """
     try:
         result = subprocess.run(
-            ["security", "find-generic-password",
+            [_SECURITY_BIN, "find-generic-password",
              "-s", _KEYCHAIN_SERVICE, "-a", _KEYCHAIN_ACCOUNT, "-w"],
             capture_output=True, text=True, check=True,
         )
@@ -88,8 +95,9 @@ def validate() -> None:
     if not TODOIST_API_KEY:
         raise RuntimeError(
             "TODOIST_API_KEY is not set — store it in macOS Keychain "
-            "(security add-generic-password -s todoist-sync -a default -w <token>) "
-            "or set it in config.env"
+            "(security add-generic-password -s todoist-sync -a default -U -w "
+            "— trailing -w with no value prompts for the token instead of "
+            "exposing it in the command line) or set it in config.env"
         )
     if CONFLICT_WINNER not in ("reminders", "todoist"):
         raise ValueError(

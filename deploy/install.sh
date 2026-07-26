@@ -165,17 +165,37 @@ require_read() {
     fi
 }
 
+# Store a token in Keychain without ever putting it in argv. Process
+# arguments are readable by other processes running as the same user (and
+# are easy to catch in a trace), so `-w "$TOKEN"` exposes the secret for
+# the lifetime of the call. Given `-w` with no value, `security` instead
+# reads the password from stdin — twice, because it asks for
+# confirmation — which keeps it off the command line entirely. Apple's own
+# man page recommends this form ("Put at end of command to be prompted").
+#
+# security writes its prompts to stderr, so those are captured and only
+# surfaced if the store actually failed.
+store_token_in_keychain() {
+    local err
+    if ! err="$(printf '%s\n%s\n' "$1" "$1" \
+        | /usr/bin/security add-generic-password -s todoist-sync -a default -U -w 2>&1 >/dev/null)"; then
+        echo "error: failed to store the token in Keychain:" >&2
+        echo "$err" >&2
+        return 1
+    fi
+}
+
 # The Todoist API token is read from macOS Keychain at runtime (see
 # config.py).  config.env is still supported as a fallback — both for
 # non-macOS dev and for anyone who hasn't migrated yet.
-KEYCHAIN_TOKEN="$(security find-generic-password -s todoist-sync -a default -w 2>/dev/null || true)"
+KEYCHAIN_TOKEN="$(/usr/bin/security find-generic-password -s todoist-sync -a default -w 2>/dev/null || true)"
 
 if [ -n "$KEYCHAIN_TOKEN" ] && [ "$RUN_SETUP" = "1" ]; then
     echo "A Todoist API token is already stored in Keychain."
     require_read -r -s -p "Enter a new token to replace it, or press Enter to keep the current one: " NEW_TOKEN
     echo
     if [ -n "$NEW_TOKEN" ]; then
-        security add-generic-password -s todoist-sync -a default -w "$NEW_TOKEN" -U
+        store_token_in_keychain "$NEW_TOKEN"
         echo "Token updated in macOS Keychain."
     fi
 elif [ -z "$KEYCHAIN_TOKEN" ]; then
@@ -183,9 +203,23 @@ elif [ -z "$KEYCHAIN_TOKEN" ]; then
         # Migrate the existing token from config.env into Keychain.
         TOKEN="$(grep '^TODOIST_API_KEY=' "$PROJECT_ROOT/config.env" | sed 's/^TODOIST_API_KEY="\(.*\)"$/\1/')"
         if [ -n "$TOKEN" ] && [ "$TOKEN" != "YOUR_API_KEY_HERE" ]; then
-            security add-generic-password -s todoist-sync -a default -w "$TOKEN" -U
+            store_token_in_keychain "$TOKEN"
+            # Strip the plaintext copy now that Keychain holds it, rather
+            # than asking the user to do it by hand — a request that's easy
+            # to skip, leaving the token sitting in a second, weaker
+            # location indefinitely. config.env is mode 0600, but unlike
+            # the Keychain copy it also rides along into Time Machine and
+            # any folder-level backup. Only runs after the store above
+            # succeeded (set -e aborts otherwise), and the token stays
+            # recoverable with:
+            #   security find-generic-password -s todoist-sync -a default -w
+            MIGRATE_TMP="$(mktemp)"
+            sed -E 's@^TODOIST_API_KEY=.*@# TODOIST_API_KEY has been moved to the macOS Keychain by install.sh@' \
+                "$PROJECT_ROOT/config.env" > "$MIGRATE_TMP"
+            mv "$MIGRATE_TMP" "$PROJECT_ROOT/config.env"
+            chmod 600 "$PROJECT_ROOT/config.env"
             echo "Migrated API token from config.env to macOS Keychain."
-            echo "You can now remove the TODOIST_API_KEY line from config.env."
+            echo "The plaintext copy in config.env has been removed."
         fi
     else
         echo "No Todoist API token found in Keychain or config.env."
@@ -195,7 +229,7 @@ elif [ -z "$KEYCHAIN_TOKEN" ]; then
             echo "error: no token entered." >&2
             exit 1
         fi
-        security add-generic-password -s todoist-sync -a default -w "$TOKEN" -U
+        store_token_in_keychain "$TOKEN"
         echo "Token stored in macOS Keychain."
     fi
 fi
