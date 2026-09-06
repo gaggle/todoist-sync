@@ -1,5 +1,5 @@
 annotated-types==0.7.0
-anyio==4.14.2
+anyio==4.15.0
 certifi==2026.6.17
 dataclass-wizard==0.39.1
 h11==0.16.0
