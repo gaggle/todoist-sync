@@ -35,6 +35,18 @@
     tail -n 40 -F "$HOME/Library/Logs/Todoist Sync/''${1:?usage: env-log staging|prod}.log"
   '';
 
+  # End-to-end scenarios against the "Sync Test" list and project, run as the
+  # staging app (see integration_tests/conftest.py). Extra args go to pytest.
+  scripts.integration-test.exec = ''
+    data="$HOME/Library/Application Support/Todoist Sync/staging"
+    out="$(mktemp -d)"
+    rm -f "$data/integration-tests.exit"
+    open -n -W --stdout "$out/stdout" --stderr "$out/stderr" \
+      "$HOME/Applications/Todoist Sync (Staging).app" --args --integration-tests "$@"
+    cat "$out/stdout" "$out/stderr"
+    exit "$(cat "$data/integration-tests.exit" 2>/dev/null || echo 1)"
+  '';
+
   # `python -m` puts the repo root on sys.path; the tests import tests.conftest.
   enterTest = ''
     python -m pytest -q

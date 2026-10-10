@@ -89,6 +89,18 @@ cp "$REPO/deploy/todoist-sync.icns" "$APP/Contents/Resources/todoist-sync.icns"
     echo "export TODOIST_SYNC_HOME=\"$DATA\""
     echo "export TODOIST_SYNC_LOG_FILE=\"$LOG\""
     echo "export TODOIST_SYNC_BRIDGE=\"$BRIDGE\""
+    if [ "$ENV" = staging ]; then
+        # Staging only: run the integration tests as this app, so they get its
+        # Reminders permission. The exit code goes to a file, since `open`
+        # doesn't pass it on.
+        echo 'if [ "${1:-}" = "--integration-tests" ]; then'
+        echo '    shift'
+        echo "    cd \"$REPO\""
+        echo "    \"$PYTHON\" -m pytest integration_tests \"\$@\""
+        echo "    echo \$? > \"$DATA/integration-tests.exit\""
+        echo '    exit 0'
+        echo 'fi'
+    fi
     echo "exec \"$PYTHON\" -m todoist_sync.sync_tasks \"\$@\""
 } > "$APP/Contents/MacOS/todoist-sync"
 chmod +x "$APP/Contents/MacOS/todoist-sync"

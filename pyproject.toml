@@ -19,3 +19,7 @@ version = {file = "VERSION"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+# Unit tests only by default; integration_tests/ runs via `integration-test`.
+testpaths = ["tests"]
