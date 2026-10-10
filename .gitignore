@@ -10,3 +10,7 @@ deploy/todoist-sync.app/
 .pytest_cache/
 .ruff_cache/
 .claude/
+
+# devenv
+.devenv*
+devenv.local.nix
