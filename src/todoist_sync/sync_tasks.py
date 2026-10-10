@@ -250,6 +250,14 @@ def _reconcile_scalar(
     return winner, True
 
 
+def _log_repeat_not_synced(kind: str, title: str, pattern: str) -> None:
+    # Repeat patterns don't translate between the two (and EventKit has no
+    # equivalent of Todoist's completion-based "every!"), so only the item
+    # and its next due date sync. Logged once, when the item is first
+    # copied, so it's known which items repeat on one side only.
+    log.info("Repeating %s %r copied as a one-off; its repeat pattern isn't synced: %s", kind, title, pattern)
+
+
 def _pair_label(pair: dict) -> str:
     return f"r={pair['reminder_id']}/t={pair['task_id']}"
 
@@ -318,15 +326,15 @@ def main(dry_run: bool = False) -> None:
                 reactivated += 1
                 save_state(STATE_PATH, pairs, archive)
             continue
-        # Only open, non-repeating reminders get copied, mirroring the
-        # Todoist side (get_active_tasks() never returns completed tasks).
-        # Nothing is recorded for a skipped reminder, so one that's reopened
-        # later is simply picked up then. Completed ones are mostly the
-        # per-occurrence history Reminders keeps for repeating reminders;
-        # repeating ones themselves stay out until completing one from
-        # Todoist is known not to end the series.
-        if r["completed"] or r["recurring"]:
+        # Only open reminders get copied, mirroring the Todoist side
+        # (get_active_tasks() never returns completed tasks). Nothing is
+        # recorded for a skipped reminder, so one that's reopened later is
+        # simply picked up then. Completed ones are mostly the
+        # per-occurrence history Reminders keeps for repeating reminders.
+        if r["completed"]:
             continue
+        if r["recurrence"]:
+            _log_repeat_not_synced("reminder", r["name"], r["recurrence"])
         task_id = todoist.create_task(project_id, r["name"], r["body"], r["due"], r["all_day"])
         pairs.append(
             {
@@ -360,6 +368,8 @@ def main(dry_run: bool = False) -> None:
             reactivated += 1
             save_state(STATE_PATH, pairs, archive)
             continue
+        if t.due is not None and t.due.is_recurring:
+            _log_repeat_not_synced("Todoist task", t.content, t.due.string)
         due_dt, all_day = _due_to_datetime(t.due)
         body = t.description or ""
         reminder_id = reminders.create_reminder(t.content, body, due_dt, all_day)

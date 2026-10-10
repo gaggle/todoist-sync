@@ -80,7 +80,7 @@ def _row_to_reminder(row: dict) -> dict:
         "completed": bool(row.get("completed")),
         "due": datetime.fromisoformat(due) if due else None,
         "all_day": bool(row.get("allDay")),
-        "recurring": bool(row.get("recurring")),
+        "recurrence": row.get("recurrence"),
     }
 
 

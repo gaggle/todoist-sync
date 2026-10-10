@@ -23,6 +23,7 @@ def _no_real_log_files():
 class FakeDue:
     date: datetime | date
     is_recurring: bool = False
+    string: str = ""
 
 
 @dataclass
@@ -44,7 +45,7 @@ class FakeStore:
     opened_project: tuple[str, bool] | None = None
 
     def add_reminder(
-        self, name="Reminder", body="", completed=False, due=None, all_day=False, id=None, recurring=False
+        self, name="Reminder", body="", completed=False, due=None, all_day=False, id=None, recurrence=None
     ):
         rid = id or f"r{self._next_reminder_id}"
         self._next_reminder_id += 1
@@ -55,7 +56,7 @@ class FakeStore:
             "completed": completed,
             "due": due,
             "all_day": all_day,
-            "recurring": recurring,
+            "recurrence": recurrence,
         }
         return rid
 

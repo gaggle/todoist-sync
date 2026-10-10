@@ -438,13 +438,28 @@ def test_skipped_completed_reminder_is_copied_once_reopened(env):
     assert [t.content for t in env.store.tasks.values()] == ["Not done after all"]
 
 
-def test_recurring_reminder_is_not_copied(env):
-    env.store.add_reminder(name="Apply flea treatment", recurring=True)
+def test_repeating_reminder_is_copied_as_a_one_off_and_its_pattern_logged(env, caplog):
+    env.store.add_reminder(name="Apply flea treatment", due=datetime(2026, 11, 1), recurrence="FREQ=MONTHLY;INTERVAL=3")
 
-    env.run()
+    with caplog.at_level("INFO"):
+        env.run()
 
-    assert env.store.tasks == {}
-    assert env.load_state() == ([], [])
+    [task] = env.store.tasks.values()
+    assert task.content == "Apply flea treatment"
+    assert task.due.is_recurring is False
+    assert "'Apply flea treatment'" in caplog.text
+    assert "FREQ=MONTHLY;INTERVAL=3" in caplog.text
+
+
+def test_repeating_todoist_task_pattern_is_logged(env, caplog):
+    env.store.add_task(content="Water plants", due=FakeDue(datetime(2026, 11, 1).date(), True, "every week"))
+
+    with caplog.at_level("INFO"):
+        env.run()
+
+    assert [r["name"] for r in env.store.reminders.values()] == ["Water plants"]
+    assert "'Water plants'" in caplog.text
+    assert "every week" in caplog.text
 
 
 def _open_pairs(env, count, completed=False):

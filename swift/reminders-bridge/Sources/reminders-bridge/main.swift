@@ -118,7 +118,41 @@ struct ReminderJSON: Codable {
     let completed: Bool
     let due: String?
     let allDay: Bool
-    let recurring: Bool
+    let recurrence: String?
+}
+
+// A compact, RRULE-style rendering of a reminder's repeat rules (e.g.
+// "FREQ=MONTHLY;INTERVAL=3"), for logging which items repeat. Built by hand
+// because EKRecurrenceRule's own description embeds an object address.
+func describeRecurrence(_ rules: [EKRecurrenceRule]?) -> String? {
+    guard let rules, !rules.isEmpty else { return nil }
+    let frequencies = ["DAILY", "WEEKLY", "MONTHLY", "YEARLY"]
+    let weekdays = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"]
+    func list(_ values: [NSNumber]?) -> String? {
+        guard let values, !values.isEmpty else { return nil }
+        return values.map { $0.stringValue }.joined(separator: ",")
+    }
+    return rules.map { rule in
+        var parts = ["FREQ=\(frequencies[rule.frequency.rawValue])", "INTERVAL=\(rule.interval)"]
+        if let days = rule.daysOfTheWeek, !days.isEmpty {
+            parts.append("BYDAY=" + days.map {
+                ($0.weekNumber != 0 ? "\($0.weekNumber)" : "") + weekdays[$0.dayOfTheWeek.rawValue - 1]
+            }.joined(separator: ","))
+        }
+        if let v = list(rule.daysOfTheMonth) { parts.append("BYMONTHDAY=\(v)") }
+        if let v = list(rule.monthsOfTheYear) { parts.append("BYMONTH=\(v)") }
+        if let v = list(rule.weeksOfTheYear) { parts.append("BYWEEKNO=\(v)") }
+        if let v = list(rule.daysOfTheYear) { parts.append("BYYEARDAY=\(v)") }
+        if let v = list(rule.setPositions) { parts.append("BYSETPOS=\(v)") }
+        if let end = rule.recurrenceEnd {
+            if let date = end.endDate {
+                parts.append("UNTIL=\(ISO8601DateFormatter().string(from: date))")
+            } else {
+                parts.append("COUNT=\(end.occurrenceCount)")
+            }
+        }
+        return parts.joined(separator: ";")
+    }.joined(separator: " | ")
 }
 
 func toJSON(_ r: EKReminder) -> ReminderJSON {
@@ -135,7 +169,7 @@ func toJSON(_ r: EKReminder) -> ReminderJSON {
         completed: r.isCompleted,
         due: due,
         allDay: allDay,
-        recurring: r.hasRecurrenceRules
+        recurrence: describeRecurrence(r.recurrenceRules)
     )
 }
 
