@@ -165,8 +165,8 @@ def env(tmp_path, monkeypatch):
     class Env:
         store = STORE
 
-        def run(self):
-            sync_tasks.main()
+        def run(self, dry_run=False):
+            sync_tasks.main(dry_run=dry_run)
 
         def load_state(self):
             return state_module.load_state(state_path)

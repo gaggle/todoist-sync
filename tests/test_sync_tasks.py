@@ -372,3 +372,46 @@ def test_differently_named_containers_are_opened_on_their_own_side(env, monkeypa
 
     assert env.store.opened_list == "Chores"
     assert env.store.opened_project == ("Family Project", False)
+
+
+def test_dry_run_creates_nothing_on_either_side_and_saves_no_state(env):
+    env.store.add_reminder(name="Mow the lawn")
+    env.store.add_reminder(name="Already done", completed=True)
+    env.store.add_task(content="Buy paint")
+
+    env.run(dry_run=True)
+
+    assert [t.content for t in env.store.tasks.values()] == ["Buy paint"]
+    assert [r["name"] for r in env.store.reminders.values()] == ["Mow the lawn", "Already done"]
+    assert env.load_state() == ([], [])
+
+
+def test_dry_run_leaves_existing_pairs_and_their_baselines_untouched(env):
+    rid, tid = _seeded_pair(env)
+    env.store.reminders[rid]["name"] = "Renamed"
+    env.store.reminders[rid]["completed"] = True
+    before = env.load_state()
+
+    env.run(dry_run=True)
+
+    assert env.store.tasks[tid].content != "Renamed"
+    assert env.store.tasks[tid].completed_at is None
+    assert env.load_state() == before
+
+
+def test_dry_run_never_creates_the_todoist_project(env):
+    env.run(dry_run=True)
+
+    assert env.store.opened_project == ("Test List", False)
+
+
+def test_dry_run_logs_what_it_would_do(env, caplog):
+    env.store.add_reminder(name="Mow the lawn")
+    env.store.add_task(content="Buy paint")
+
+    with caplog.at_level("INFO"):
+        env.run(dry_run=True)
+
+    assert "DRY RUN: would create Todoist task 'Mow the lawn'" in caplog.text
+    assert "DRY RUN: would create reminder 'Buy paint'" in caplog.text
+    assert "DRY RUN: Sync complete: 1 reminder(s) -> Todoist, 1 task(s) -> Reminders" in caplog.text

@@ -3,4 +3,4 @@
 # the todoist-sync.app bundle — its location relative to the project root
 # changes based on nesting depth, so a baked-in absolute path is more
 # robust than BASH_SOURCE-relative traversal.
-exec "__PROJECT_ROOT__/.venv/bin/python" -m todoist_sync.sync_tasks
+exec "__PROJECT_ROOT__/.venv/bin/python" -m todoist_sync.sync_tasks "$@"

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import fcntl
 import logging
 import logging.handlers
@@ -30,6 +31,7 @@ from .config import (
     TODOIST_API_KEY,
     TODOIST_PROJECT,
 )
+from .dry_run import DryRunReminders, DryRunTodoist
 from .reminders_bridge import RemindersBridge, RemindersUnavailableError
 from .todoist_bridge import TodoistBridge
 
@@ -228,8 +230,12 @@ def _pair_label(pair: dict) -> str:
     return f"r={pair['reminder_id']}/t={pair['task_id']}"
 
 
-def main() -> None:
-    log.info("todoist-sync v%s starting", __version__)
+def _skip_save_state(*_args) -> None:
+    pass
+
+
+def main(dry_run: bool = False) -> None:
+    log.info("todoist-sync v%s starting%s", __version__, " (dry run: nothing will be written)" if dry_run else "")
     config.validate()
     log.debug(
         "config: reminders_list=%r todoist_project=%r conflict_winner=%r archive_after_days=%d "
@@ -242,7 +248,13 @@ def main() -> None:
     )
     reminders = RemindersBridge(REMINDERS_LIST)
     todoist = TodoistBridge(TODOIST_API_KEY)
-    project_id = todoist.get_or_create_project(TODOIST_PROJECT, create=CREATE_TODOIST_PROJECT)
+    project_id = todoist.get_or_create_project(TODOIST_PROJECT, create=CREATE_TODOIST_PROJECT and not dry_run)
+    # A dry run reads both sides for real but routes every write — to
+    # Reminders, Todoist, and state.json — to a log line instead.
+    save_state = _skip_save_state if dry_run else state.save_state
+    if dry_run:
+        reminders = DryRunReminders(reminders)
+        todoist = DryRunTodoist(todoist)
 
     pairs, archive = state.load_state(STATE_PATH)
     linked_reminder_ids = {p["reminder_id"] for p in pairs}
@@ -280,7 +292,7 @@ def main() -> None:
             if not r["completed"]:
                 _unarchive(archived_pair)
                 reactivated += 1
-                state.save_state(STATE_PATH, pairs, archive)
+                save_state(STATE_PATH, pairs, archive)
             continue
         task_id = todoist.create_task(project_id, r["name"], r["body"], r["due"], r["all_day"])
         if r["completed"]:
@@ -302,7 +314,7 @@ def main() -> None:
         # later item in this loop fails (e.g. connectivity drops mid-run),
         # an un-persisted pair here would make this reminder look unlinked
         # again next run and get a duplicate task created for it.
-        state.save_state(STATE_PATH, pairs, archive)
+        save_state(STATE_PATH, pairs, archive)
 
     created_in_reminders = 0
     for t in todoist.get_active_tasks(project_id):
@@ -315,7 +327,7 @@ def main() -> None:
             # needed, unlike the reminders side above.
             _unarchive(archived_pair)
             reactivated += 1
-            state.save_state(STATE_PATH, pairs, archive)
+            save_state(STATE_PATH, pairs, archive)
             continue
         due_dt, all_day = _due_to_datetime(t.due)
         body = t.description or ""
@@ -334,7 +346,7 @@ def main() -> None:
         linked_reminder_ids.add(reminder_id)
         created_in_reminders += 1
         # Same rationale as above: create_reminder() is not idempotent.
-        state.save_state(STATE_PATH, pairs, archive)
+        save_state(STATE_PATH, pairs, archive)
 
     # 2. Reconcile already-linked pairs by id directly. Reminder lookups are
     #    scoped to REMINDERS_LIST on the Swift side (not just addressed by global
@@ -513,7 +525,7 @@ def main() -> None:
         log.debug("Pair %s: pruned (missing for %d consecutive checks)", _pair_label(pair), pair["missing_checks"])
         pairs.remove(pair)
 
-    state.save_state(STATE_PATH, pairs, archive)
+    save_state(STATE_PATH, pairs, archive)
     _clear_failure_markers()
 
     if not any(
@@ -529,12 +541,13 @@ def main() -> None:
             to_prune,
         )
     ):
-        log.info("Sync complete: no changes")
+        log.info("%sSync complete: no changes", "DRY RUN: " if dry_run else "")
     else:
         log.info(
-            "Sync complete: %d reminder(s) -> Todoist, %d task(s) -> Reminders, "
+            "%sSync complete: %d reminder(s) -> Todoist, %d task(s) -> Reminders, "
             "%d completion(s) synced, %d due date(s) synced, %d title(s) synced, "
             "%d note(s) synced, %d reactivated from archive, %d archived, %d pruned",
+            "DRY RUN: " if dry_run else "",
             created_in_todoist,
             created_in_reminders,
             completed_synced,
@@ -550,12 +563,21 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(prog="todoist-sync")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="read both sides and log what would change, without writing anything",
+    )
+    # parse_known_args: an app bundle launched via LaunchServices can be
+    # handed extra arguments of its own, which shouldn't abort the sync.
+    args, _ = parser.parse_known_args()
     lock_file = _acquire_lock()
     if lock_file is None:
         log.info("Another sync is already running — skipping this run")
         sys.exit(0)
     try:
-        main()
+        main(dry_run=args.dry_run)
     except httpx.TransportError:
         # No response reached us at all (DNS failure, connection refused,
         # timed out, etc.) — treat this as "internet unavailable" rather
