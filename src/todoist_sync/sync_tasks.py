@@ -19,6 +19,7 @@ from .config import (
     BREAKER_PATH,
     CONFLICT_WINNER,
     CREATE_TODOIST_PROJECT,
+    ENVIRONMENT,
     LOCK_PATH,
     LOG_LEVEL,
     LOG_PATH,
@@ -120,10 +121,10 @@ def _describe(exc: Exception) -> str:
 def _raise_alarm(reason: str) -> None:
     """Gets a stopped sync noticed: a Mac notification, plus a high-priority
     reminder in the default Reminders list so it reaches the phone too."""
-    _notify_macos("Todoist Sync stopped", f"{reason} — paused until you check {LOG_PATH}")
+    _notify_macos(f"Todoist Sync ({ENVIRONMENT}) stopped", f"{reason} — paused until you check {LOG_PATH}")
     try:
         create_alert_reminder(
-            "Todoist Sync stopped — check the Mac",
+            f"Todoist Sync ({ENVIRONMENT}) stopped — check the Mac",
             f"{reason}\n\nSyncing is paused. Details: {LOG_PATH}\nTo resume once fixed: rm {BREAKER_PATH}",
         )
     except Exception:
@@ -267,7 +268,9 @@ def _skip_save_state(*_args) -> None:
 
 
 def main(dry_run: bool = False) -> None:
-    log.info("todoist-sync v%s starting%s", __version__, " (dry run: nothing will be written)" if dry_run else "")
+    log.info(
+        "todoist-sync v%s (%s) starting%s", __version__, ENVIRONMENT, " (dry run: nothing will be written)" if dry_run else ""
+    )
     config.validate()
     log.debug(
         "config: reminders_list=%r todoist_project=%r conflict_winner=%r archive_after_days=%d "
@@ -665,6 +668,10 @@ def run(argv: list[str] | None = None) -> int:
     # parse_known_args: an app bundle launched via LaunchServices can be
     # handed extra arguments of its own, which shouldn't abort the sync.
     args, _ = parser.parse_known_args(argv)
+
+    if ENVIRONMENT is None:
+        log.error("Not running in an environment (TODOIST_SYNC_HOME is unset) — use a Todoist Sync app built by deploy/env.sh")
+        return 2
 
     if not args.dry_run and BREAKER_PATH.exists():
         log.warning(

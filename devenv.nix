@@ -17,20 +17,22 @@
     '';
   };
 
-  # Swift helpers + deploy/todoist-sync.app, running this venv's Python.
-  scripts.build-app.exec = ''
-    TODOIST_SYNC_PYTHON="$DEVENV_STATE/venv/bin/python" "$DEVENV_ROOT/deploy/build-app.sh"
+  # Build an environment app: `env-build staging` (live repo code) or
+  # `env-build prod` (snapshot of the committed HEAD). See deploy/env.sh.
+  scripts.env-build.exec = ''
+    "$DEVENV_ROOT/deploy/env.sh" "$@"
   '';
 
-  # Runs one sync through the app bundle, so macOS attributes Reminders
-  # access to Todoist Sync rather than the calling terminal. Output goes to
-  # var/sync.log (see sync-log). Pass --dry-run to preview.
-  scripts.sync.exec = ''
-    open -n -W "$DEVENV_ROOT/deploy/todoist-sync.app" --args "$@"
+  # One sync through an environment's app — so macOS attributes Reminders
+  # access to that app — e.g. `env-sync staging --dry-run`.
+  scripts.env-sync.exec = ''
+    env="$1"; shift
+    case "$env" in staging) name="Todoist Sync (Staging)" ;; prod) name="Todoist Sync" ;; *) echo "usage: env-sync staging|prod [--dry-run]" >&2; exit 1 ;; esac
+    open -n -W "$HOME/Applications/$name.app" --args "$@"
   '';
 
-  scripts.sync-log.exec = ''
-    tail -n 40 -F "$DEVENV_ROOT/var/sync.log"
+  scripts.env-log.exec = ''
+    tail -n 40 -F "$HOME/Library/Logs/Todoist Sync/''${1:?usage: env-log staging|prod}.log"
   '';
 
   # `python -m` puts the repo root on sys.path; the tests import tests.conftest.

@@ -1,5 +1,0 @@
-#!/bin/bash
-# __PYTHON__ is substituted by build-app.sh when this is copied into the
-# todoist-sync.app bundle — an absolute interpreter path baked in at build
-# time is more robust than resolving it relative to the bundle's location.
-exec "__PYTHON__" -m todoist_sync.sync_tasks "$@"

@@ -1,13 +1,51 @@
 import logging
 import subprocess
 from pathlib import Path
+from typing import NamedTuple
 
 from dotenv import load_dotenv
 import os
 
 # src/todoist_sync/config.py -> project root is three levels up
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-ENV_PATH = PROJECT_ROOT / "config.env"
+
+
+class Paths(NamedTuple):
+    environment: str | None
+    data_dir: Path
+    config_file: Path
+    log_file: Path
+    bridge: Path
+
+
+def resolve_paths(environ, project_root: Path) -> Paths:
+    """Where this run's config, state, log and Reminders bridge live.
+
+    Each environment app (staging, prod — built by deploy/env.sh) names
+    itself in TODOIST_SYNC_ENV and points TODOIST_SYNC_HOME at its own data
+    dir: config.env, state.json, the lock and the circuit breaker live
+    there, so environments never share state. Without an environment, paths
+    fall back to the repo's var/ (enough for tests to import this module),
+    but run() refuses to sync: a run straight from a checkout must not be
+    able to touch a list that an environment owns.
+    """
+    home = environ.get("TODOIST_SYNC_HOME")
+    data_dir = Path(home) if home else project_root / "var"
+    return Paths(
+        environment=environ.get("TODOIST_SYNC_ENV") if home else None,
+        data_dir=data_dir,
+        config_file=data_dir / "config.env",
+        log_file=Path(environ.get("TODOIST_SYNC_LOG_FILE") or data_dir / "sync.log"),
+        bridge=Path(
+            environ.get("TODOIST_SYNC_BRIDGE")
+            or project_root / "swift/reminders-bridge/.build/release/reminders-bridge"
+        ),
+    )
+
+
+PATHS = resolve_paths(os.environ, PROJECT_ROOT)
+ENVIRONMENT = PATHS.environment
+ENV_PATH = PATHS.config_file
 load_dotenv(dotenv_path=ENV_PATH)
 
 # config.env may hold a live API key — re-assert owner-only permissions on
@@ -64,14 +102,15 @@ def resolve_container_names(environ) -> tuple[str, str, bool]:
 
 REMINDERS_LIST, TODOIST_PROJECT, CREATE_TODOIST_PROJECT = resolve_container_names(os.environ)
 
-VAR_DIR = PROJECT_ROOT / "var"
-VAR_DIR.mkdir(exist_ok=True)
+VAR_DIR = PATHS.data_dir
+VAR_DIR.mkdir(parents=True, exist_ok=True)
 VAR_DIR.chmod(0o700)
 STATE_PATH = VAR_DIR / "state.json"
-LOG_PATH = VAR_DIR / "sync.log"
+LOG_PATH = PATHS.log_file
+LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 # Present = circuit breaker open: syncing is paused until a human removes
-# it. Lives in var/ rather than /tmp, which macOS clears on reboot — that
-# would quietly resume a sync that was stopped for a reason.
+# it. Lives in the data dir rather than /tmp, which macOS clears on reboot —
+# that would quietly resume a sync that was stopped for a reason.
 BREAKER_PATH = VAR_DIR / "circuit-breaker-open"
 LOCK_PATH = VAR_DIR / "sync.lock"
 

@@ -6,16 +6,12 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+from .config import PATHS
+
 log = logging.getLogger(__name__)
 
-_BINARY = (
-    Path(__file__).resolve().parent.parent.parent
-    / "swift"
-    / "reminders-bridge"
-    / ".build"
-    / "release"
-    / "reminders-bridge"
-)
+# A repo checkout's build by default; an environment app points at its own.
+_BINARY = PATHS.bridge
 
 
 class RemindersUnavailableError(RuntimeError):

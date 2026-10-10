@@ -119,6 +119,33 @@ deploy/                    launchd LaunchAgents, wrapper script, installer
 var/                       generated at runtime — state.json, sync.log
 ```
 
+## Environments (this fork)
+
+This fork runs as separate, self-contained environments, so work in
+progress can't touch a list you care about:
+
+| | staging | prod |
+|---|---|---|
+| App | `~/Applications/Todoist Sync (Staging).app` | `~/Applications/Todoist Sync.app` |
+| Code | the repo's live working tree | a frozen snapshot of the committed `HEAD` |
+| Data (config.env, state, breaker) | `~/Library/Application Support/Todoist Sync/staging/` | `…/prod/` |
+| Log (visible in Console.app) | `~/Library/Logs/Todoist Sync/staging.log` | `…/prod.log` |
+
+```bash
+devenv shell -- env-build staging     # or prod (needs a clean, committed tree)
+devenv shell -- env-sync staging      # one sync; add --dry-run to preview
+devenv shell -- env-log staging       # follow the log
+```
+
+Each app asks for Reminders access once, under its own name. Its bundle
+only holds a wrapper with fixed paths, so rebuilding never re-prompts.
+A prod rebuild snapshots into `build-<sha>/` and repoints the `app`
+symlink, leaving the previous build in place for rollback. Running the
+sync without an environment (straight from a checkout) is refused.
+
+The Setup and Scheduling sections below describe upstream's `install.sh`,
+which this fork has gated off while its launchd setup is reworked.
+
 ## Setup
 
 ```bash

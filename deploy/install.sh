@@ -23,6 +23,12 @@
 # marker comment so it's safe to re-run.
 set -euo pipefail
 
+# This fork builds self-contained staging/prod environments with
+# deploy/env.sh instead; the LaunchAgent setup below is being reworked to
+# match and isn't usable meanwhile.
+echo "install.sh is superseded by deploy/env.sh (staging|prod) in this fork; launchd setup is being reworked." >&2
+exit 1
+
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LABEL="com.todoist-sync.local"
 PLIST_PATH="$HOME/Library/LaunchAgents/${LABEL}.plist"

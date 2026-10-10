@@ -33,6 +33,7 @@ def runner(tmp_path, monkeypatch):
         def close(self):
             pass
 
+    monkeypatch.setattr(sync_tasks, "ENVIRONMENT", "test")
     monkeypatch.setattr(sync_tasks, "main", fake_main)
     monkeypatch.setattr(sync_tasks, "BREAKER_PATH", Runner.breaker)
     monkeypatch.setattr(sync_tasks, "_acquire_lock", FakeLock)
@@ -108,3 +109,11 @@ def test_unexpected_error_in_a_dry_run_crashes_without_tripping(runner):
 
     assert not runner.breaker.exists()
     assert runner.alarms == []
+
+
+def test_refuses_to_run_outside_an_environment(runner, monkeypatch):
+    monkeypatch.setattr(sync_tasks, "ENVIRONMENT", None)
+
+    assert sync_tasks.run([]) == 2
+    assert runner.main_calls == []
+    assert not runner.breaker.exists()
