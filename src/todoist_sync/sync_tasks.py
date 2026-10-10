@@ -409,14 +409,18 @@ def main(dry_run: bool = False) -> None:
     now = datetime.now()
     to_archive = []
     to_prune = []
+    # One listing of the whole list rather than a bridge process per pair;
+    # taken after step 1, so it includes the reminders just created there.
+    current_reminders = {r["id"]: r for r in reminders.get_reminders()}
     for pair in pairs:
         if dry_run and is_placeholder_pair(pair):
             continue
-        r = reminders.get_reminder(pair["reminder_id"])
+        r = current_reminders.get(pair["reminder_id"])
         t = todoist.get_task(pair["task_id"], project_id)
         if r is None or t is None:
-            # get_reminder/get_task only return None on a confirmed 404, not
-            # on a transient error (those raise instead) — so this is a real
+            # A reminder missing from its list's listing, or get_task's None
+            # on a confirmed 404, is never a transient error (those raise
+            # instead) — so this is a real
             # deletion signal, not a flaky one. Still require a few
             # consecutive misses rather than pruning on the first sighting,
             # in case the other side is mid-edit (e.g. an EventKit/iCloud

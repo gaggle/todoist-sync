@@ -40,7 +40,7 @@ class _ReadThrough:
 
 
 class DryRunReminders(_ReadThrough):
-    _reads = frozenset({"get_reminders", "get_reminder"})
+    _reads = frozenset({"get_reminders"})
 
     def create_reminder(self, name, body, due_dt=None, all_day=False) -> str:
         log.info("DRY RUN: would create reminder %r (due %s)", name, due_dt)

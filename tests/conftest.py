@@ -83,11 +83,6 @@ class FakeRemindersBridge:
     def get_reminders(self):
         return [dict(r) for r in STORE.reminders.values()]
 
-    def get_reminder(self, reminder_id):
-        _reject_dry_run_placeholder(reminder_id)
-        r = STORE.reminders.get(reminder_id)
-        return dict(r) if r else None
-
     def create_reminder(self, name, body, due_dt=None, all_day=False):
         return STORE.add_reminder(name=name, body=body, due=due_dt, all_day=all_day)
 

@@ -104,10 +104,6 @@ class RemindersBridge:
         rows = json.loads(_run("get-reminders", "--list", self.list_name))
         return [_row_to_reminder(row) for row in rows]
 
-    def get_reminder(self, reminder_id: str) -> dict | None:
-        row = json.loads(_run("get-reminder", "--list", self.list_name, "--id", reminder_id))
-        return _row_to_reminder(row) if row else None
-
     def create_reminder(self, name: str, body: str, due_dt: datetime | None = None, all_day: bool = False) -> str:
         args = ["create-reminder", "--list", self.list_name, "--name", name, "--body", body]
         due = _serialize_due(due_dt)
