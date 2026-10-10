@@ -43,7 +43,9 @@ class FakeStore:
     opened_list: str | None = None
     opened_project: tuple[str, bool] | None = None
 
-    def add_reminder(self, name="Reminder", body="", completed=False, due=None, all_day=False, id=None):
+    def add_reminder(
+        self, name="Reminder", body="", completed=False, due=None, all_day=False, id=None, recurring=False
+    ):
         rid = id or f"r{self._next_reminder_id}"
         self._next_reminder_id += 1
         self.reminders[rid] = {
@@ -53,6 +55,7 @@ class FakeStore:
             "completed": completed,
             "due": due,
             "all_day": all_day,
+            "recurring": recurring,
         }
         return rid
 

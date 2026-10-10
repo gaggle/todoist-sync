@@ -118,6 +118,7 @@ struct ReminderJSON: Codable {
     let completed: Bool
     let due: String?
     let allDay: Bool
+    let recurring: Bool
 }
 
 func toJSON(_ r: EKReminder) -> ReminderJSON {
@@ -133,7 +134,8 @@ func toJSON(_ r: EKReminder) -> ReminderJSON {
         body: r.notes ?? "",
         completed: r.isCompleted,
         due: due,
-        allDay: allDay
+        allDay: allDay,
+        recurring: r.hasRecurrenceRules
     )
 }
 

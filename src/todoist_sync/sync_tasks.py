@@ -294,16 +294,23 @@ def main(dry_run: bool = False) -> None:
                 reactivated += 1
                 save_state(STATE_PATH, pairs, archive)
             continue
+        # Only open, non-repeating reminders get copied, mirroring the
+        # Todoist side (get_active_tasks() never returns completed tasks).
+        # Nothing is recorded for a skipped reminder, so one that's reopened
+        # later is simply picked up then. Completed ones are mostly the
+        # per-occurrence history Reminders keeps for repeating reminders;
+        # repeating ones themselves stay out until completing one from
+        # Todoist is known not to end the series.
+        if r["completed"] or r["recurring"]:
+            continue
         task_id = todoist.create_task(project_id, r["name"], r["body"], r["due"], r["all_day"])
-        if r["completed"]:
-            todoist.complete_task(task_id)
         pairs.append(
             {
                 "reminder_id": r["id"],
                 "task_id": task_id,
                 "due": _serialize_due(r["due"]),
                 "all_day": r["all_day"],
-                "completed": r["completed"],
+                "completed": False,
                 "name": r["name"],
                 "body": r["body"],
             }

@@ -415,3 +415,33 @@ def test_dry_run_logs_what_it_would_do(env, caplog):
     assert "DRY RUN: would create Todoist task 'Mow the lawn'" in caplog.text
     assert "DRY RUN: would create reminder 'Buy paint'" in caplog.text
     assert "DRY RUN: Sync complete: 1 reminder(s) -> Todoist, 1 task(s) -> Reminders" in caplog.text
+
+
+def test_reminder_already_completed_when_first_seen_is_not_copied(env):
+    env.store.add_reminder(name="Done before syncing", completed=True)
+
+    env.run()
+
+    assert env.store.tasks == {}
+    assert env.load_state() == ([], [])
+
+
+def test_skipped_completed_reminder_is_copied_once_reopened(env):
+    rid = env.store.add_reminder(name="Not done after all", completed=True)
+    env.run()
+    env.store.reminders[rid]["completed"] = False
+
+    env.run()
+
+    pairs, _ = env.load_state()
+    assert [p["reminder_id"] for p in pairs] == [rid]
+    assert [t.content for t in env.store.tasks.values()] == ["Not done after all"]
+
+
+def test_recurring_reminder_is_not_copied(env):
+    env.store.add_reminder(name="Apply flea treatment", recurring=True)
+
+    env.run()
+
+    assert env.store.tasks == {}
+    assert env.load_state() == ([], [])
