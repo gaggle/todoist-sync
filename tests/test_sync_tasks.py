@@ -445,3 +445,102 @@ def test_recurring_reminder_is_not_copied(env):
 
     assert env.store.tasks == {}
     assert env.load_state() == ([], [])
+
+
+def _open_pairs(env, count, completed=False):
+    """Seeds `count` linked pairs, all open (or all completed) on both sides."""
+    pairs = []
+    for i in range(count):
+        rid = env.store.add_reminder(id=f"r{i}", name=f"Item {i}", completed=completed)
+        tid = env.store.add_task(id=f"t{i}", content=f"Item {i}", completed=completed)
+        pairs.append({"reminder_id": rid, "task_id": tid, "name": f"Item {i}", "body": "", "completed": completed})
+    env.write_state(pairs)
+    return [(p["reminder_id"], p["task_id"]) for p in pairs]
+
+
+def test_task_gone_from_todoist_deletes_its_reminder_once_confirmed(env, monkeypatch):
+    import todoist_sync.sync_tasks as sync_tasks
+
+    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 2)
+    [(rid, tid)] = _open_pairs(env, 1)
+    del env.store.tasks[tid]
+
+    env.run()
+    assert rid in env.store.reminders
+
+    env.run()
+    assert rid not in env.store.reminders
+    assert env.load_state() == ([], [])
+
+
+def test_reminder_gone_from_its_list_deletes_its_task_once_confirmed(env, monkeypatch):
+    import todoist_sync.sync_tasks as sync_tasks
+
+    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 2)
+    [(rid, tid)] = _open_pairs(env, 1)
+    del env.store.reminders[rid]
+
+    env.run()
+    assert tid in env.store.tasks
+
+    env.run()
+    assert tid not in env.store.tasks
+    assert env.load_state() == ([], [])
+
+
+def test_more_open_removals_than_the_limit_are_held_back_and_notified(env, monkeypatch):
+    import todoist_sync.sync_tasks as sync_tasks
+
+    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 1)
+    monkeypatch.setattr(sync_tasks, "_MAX_OPEN_DELETES_PER_RUN", 2)
+    for rid, _ in _open_pairs(env, 3):
+        del env.store.reminders[rid]
+
+    env.run()
+
+    assert len(env.store.tasks) == 3
+    pairs, _ = env.load_state()
+    assert len(pairs) == 3
+    assert len(env.notifications) == 1
+
+
+def test_allow_mass_delete_lets_a_held_back_batch_through(env, monkeypatch):
+    import todoist_sync.sync_tasks as sync_tasks
+
+    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 1)
+    monkeypatch.setattr(sync_tasks, "_MAX_OPEN_DELETES_PER_RUN", 2)
+    for rid, _ in _open_pairs(env, 3):
+        del env.store.reminders[rid]
+
+    env.run(allow_mass_delete=True)
+
+    assert env.store.tasks == {}
+    assert env.load_state() == ([], [])
+
+
+def test_completed_items_do_not_count_toward_the_mass_delete_limit(env, monkeypatch):
+    import todoist_sync.sync_tasks as sync_tasks
+
+    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 1)
+    monkeypatch.setattr(sync_tasks, "_MAX_OPEN_DELETES_PER_RUN", 2)
+    for rid, _ in _open_pairs(env, 3, completed=True):
+        del env.store.reminders[rid]
+
+    env.run()
+
+    assert env.store.tasks == {}
+    assert env.notifications == []
+
+
+def test_dry_run_only_logs_the_deletion(env, monkeypatch, caplog):
+    import todoist_sync.sync_tasks as sync_tasks
+
+    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 1)
+    [(rid, tid)] = _open_pairs(env, 1)
+    del env.store.tasks[tid]
+
+    with caplog.at_level("INFO"):
+        env.run(dry_run=True)
+
+    assert rid in env.store.reminders
+    assert f"DRY RUN: would delete reminder {rid}" in caplog.text

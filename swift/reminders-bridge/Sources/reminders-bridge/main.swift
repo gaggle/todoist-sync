@@ -325,6 +325,21 @@ case "set-due":
         printJSON(["ok": false])
     }
 
+case "delete":
+    guard let listName = opts.opt("list"), let id = opts.opt("id"),
+          let item = findReminder(id: id, inList: listName)
+    else {
+        printJSON(["ok": false])
+        break
+    }
+    do {
+        try store.remove(item, commit: true)
+        printJSON(["ok": true])
+    } catch {
+        eprint("remove failed: \(error)")
+        printJSON(["ok": false])
+    }
+
 default:
     eprint("unknown command: \(command)")
     exit(1)

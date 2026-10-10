@@ -111,6 +111,10 @@ class FakeRemindersBridge:
         STORE.reminders[reminder_id]["all_day"] = all_day
         return True
 
+    def delete_reminder(self, reminder_id):
+        del STORE.reminders[reminder_id]
+        return True
+
 
 class FakeTodoistBridge:
     def __init__(self, api_token):
@@ -148,6 +152,9 @@ class FakeTodoistBridge:
     def uncomplete_task(self, task_id):
         STORE.tasks[task_id].completed_at = None
 
+    def delete_task(self, task_id):
+        del STORE.tasks[task_id]
+
     def close(self):
         pass
 
@@ -173,15 +180,22 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 4)
     monkeypatch.setattr(sync_tasks, "_FAILURE_MARKERS", ())
     monkeypatch.setattr(sync_tasks.config, "validate", lambda: None)
+    monkeypatch.setattr(sync_tasks, "MASS_DELETE_MARKER", tmp_path / "mass-delete-held-since")
+    notifications = []
+    monkeypatch.setattr(sync_tasks, "_notify_once", lambda marker, title, message: notifications.append(message))
 
     class Env:
         store = STORE
 
-        def run(self, dry_run=False):
-            sync_tasks.main(dry_run=dry_run)
+        def run(self, dry_run=False, allow_mass_delete=False):
+            sync_tasks.main(dry_run=dry_run, allow_mass_delete=allow_mass_delete)
 
         def load_state(self):
             return state_module.load_state(state_path)
+
+        @property
+        def notifications(self):
+            return notifications
 
         def write_state(self, pairs, archive=None):
             state_module.save_state(state_path, pairs, archive or [])

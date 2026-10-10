@@ -73,6 +73,7 @@ NETWORK_DOWN_MARKER = VAR_DIR / "network-down-since"
 AUTH_FAILURE_MARKER = VAR_DIR / "auth-failure-since"
 REMINDERS_ACCESS_MARKER = VAR_DIR / "reminders-access-down-since"
 SYNC_FAILURE_MARKER = VAR_DIR / "sync-failure-since"
+MASS_DELETE_MARKER = VAR_DIR / "mass-delete-held-since"
 LOCK_PATH = VAR_DIR / "sync.lock"
 
 # TODOIST_API_KEY/CONFLICT_WINNER are read leniently here (no raise) and

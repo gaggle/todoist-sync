@@ -66,6 +66,10 @@ class DryRunReminders(_ReadThrough):
         log.info("DRY RUN: would set reminder %s due to %s (all_day=%s)", reminder_id, due_dt, all_day)
         return True
 
+    def delete_reminder(self, reminder_id) -> bool:
+        log.info("DRY RUN: would delete reminder %s", reminder_id)
+        return True
+
 
 class DryRunTodoist(_ReadThrough):
     _reads = frozenset({"get_active_tasks", "get_task", "close"})
@@ -88,3 +92,6 @@ class DryRunTodoist(_ReadThrough):
 
     def set_task_due(self, task_id, due_dt, all_day) -> None:
         log.info("DRY RUN: would set Todoist task %s due to %s (all_day=%s)", task_id, due_dt, all_day)
+
+    def delete_task(self, task_id) -> None:
+        log.info("DRY RUN: would delete Todoist task %s", task_id)

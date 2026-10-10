@@ -22,6 +22,7 @@ from .config import (
     LOCK_PATH,
     LOG_LEVEL,
     LOG_PATH,
+    MASS_DELETE_MARKER,
     NETWORK_DOWN_MARKER,
     PRUNE_MISSING_AFTER_CHECKS,
     REMINDERS_ACCESS_MARKER,
@@ -36,6 +37,9 @@ from .reminders_bridge import RemindersBridge, RemindersUnavailableError
 from .todoist_bridge import TodoistBridge
 
 _NOTIFY_THROTTLE = timedelta(hours=1)
+# More open items than this confirmed gone from one side in a single run
+# is treated as a glitch rather than a tidy-up; see step 4 in main().
+_MAX_OPEN_DELETES_PER_RUN = 3
 _FAILURE_MARKERS = (NETWORK_DOWN_MARKER, AUTH_FAILURE_MARKER, REMINDERS_ACCESS_MARKER, SYNC_FAILURE_MARKER)
 
 _MAX_LOG_BYTES = 1_000_000  # 1 MB per file
@@ -234,7 +238,7 @@ def _skip_save_state(*_args) -> None:
     pass
 
 
-def main(dry_run: bool = False) -> None:
+def main(dry_run: bool = False, allow_mass_delete: bool = False) -> None:
     log.info("todoist-sync v%s starting%s", __version__, " (dry run: nothing will be written)" if dry_run else "")
     config.validate()
     log.debug(
@@ -387,9 +391,8 @@ def main(dry_run: bool = False) -> None:
             # (not elapsed time) is what actually matters here — it demands
             # that many independent confirmations regardless of how much
             # wall-clock time passed between them (e.g. the Mac sleeping).
-            # Once confirmed gone, prune outright rather than archive:
-            # unlike a completed pair, a deleted one has no id worth
-            # matching a reactivation against.
+            # Once confirmed gone, the removal is mirrored and the pair
+            # pruned (step 4).
             pair["missing_checks"] = pair.get("missing_checks", 0) + 1
             log.debug(
                 "Pair %s: reminder or task missing (check %d/%d)",
@@ -398,7 +401,10 @@ def main(dry_run: bool = False) -> None:
                 PRUNE_MISSING_AFTER_CHECKS,
             )
             if pair["missing_checks"] >= PRUNE_MISSING_AFTER_CHECKS:
-                to_prune.append(pair)
+                # The side still holding the item, if any, is where the
+                # removal gets mirrored.
+                survivor = "reminder" if r is not None else "task" if t is not None else None
+                to_prune.append((pair, survivor))
             continue
         if pair.get("missing_checks"):
             pair["missing_checks"] = 0
@@ -527,11 +533,52 @@ def main(dry_run: bool = False) -> None:
         pairs.remove(pair)
         archive.append(pair)
 
-    # 4. Drop pairs whose reminder and/or task has been confirmed gone for
-    #    longer than SYNC_PRUNE_MISSING_AFTER_DAYS. These are removed
-    #    outright, not archived — there's nothing left to reactivate.
-    for pair in to_prune:
-        log.debug("Pair %s: pruned (missing for %d consecutive checks)", _pair_label(pair), pair["missing_checks"])
+    # 4. Mirror confirmed removals, then drop those pairs. An item gone from
+    #    one side for PRUNE_MISSING_AFTER_CHECKS runs — deleted, or moved to
+    #    another list/project — is deleted from the other side too, so the
+    #    two containers stay mirrors; a pair gone from both sides just drops.
+    #    Pairs are removed outright, not archived: nothing is left to
+    #    reactivate.
+    #
+    #    Brake: lots of *open* items vanishing at once looks less like
+    #    tidying up than like a glitch — e.g. a full iCloud resync, which
+    #    Apple documents can change every reminder's id — and mirroring
+    #    that would wipe the shared project. Above the limit nothing is
+    #    deleted (the pairs stay, re-checked every run) until a run with
+    #    --allow-mass-delete. Completed items don't count: clearing out a
+    #    ticked-off list is routine.
+    open_removals = sum(1 for pair, survivor in to_prune if survivor and not pair.get("completed"))
+    if open_removals > _MAX_OPEN_DELETES_PER_RUN and not allow_mass_delete:
+        log.warning(
+            "Holding back deletion of %d open item(s) that vanished from one side at once (limit %d) "
+            "— run once with --allow-mass-delete if that was intended",
+            open_removals,
+            _MAX_OPEN_DELETES_PER_RUN,
+        )
+        if not dry_run:
+            _notify_once(
+                MASS_DELETE_MARKER,
+                "Todoist Sync",
+                f"{open_removals} open items vanished from one side at once — not deleting them. Check the log.",
+            )
+        to_prune = [(pair, survivor) for pair, survivor in to_prune if survivor is None]
+    elif MASS_DELETE_MARKER.exists() and not dry_run:
+        MASS_DELETE_MARKER.unlink()
+
+    removals_mirrored = 0
+    for pair, survivor in to_prune:
+        if survivor == "reminder":
+            reminders.delete_reminder(pair["reminder_id"])
+            removals_mirrored += 1
+        elif survivor == "task":
+            todoist.delete_task(pair["task_id"])
+            removals_mirrored += 1
+        log.debug(
+            "Pair %s: pruned (missing for %d consecutive checks; deleted the %s)",
+            _pair_label(pair),
+            pair["missing_checks"],
+            survivor or "nothing, both sides gone",
+        )
         pairs.remove(pair)
 
     save_state(STATE_PATH, pairs, archive)
@@ -555,7 +602,7 @@ def main(dry_run: bool = False) -> None:
         log.info(
             "%sSync complete: %d reminder(s) -> Todoist, %d task(s) -> Reminders, "
             "%d completion(s) synced, %d due date(s) synced, %d title(s) synced, "
-            "%d note(s) synced, %d reactivated from archive, %d archived, %d pruned",
+            "%d note(s) synced, %d reactivated from archive, %d archived, %d removal(s) mirrored, %d pruned",
             "DRY RUN: " if dry_run else "",
             created_in_todoist,
             created_in_reminders,
@@ -565,6 +612,7 @@ def main(dry_run: bool = False) -> None:
             notes_synced,
             reactivated,
             len(to_archive),
+            removals_mirrored,
             len(to_prune),
         )
 
@@ -578,6 +626,11 @@ if __name__ == "__main__":
         action="store_true",
         help="read both sides and log what would change, without writing anything",
     )
+    parser.add_argument(
+        "--allow-mass-delete",
+        action="store_true",
+        help=f"mirror removals even when more than {_MAX_OPEN_DELETES_PER_RUN} open items vanished at once",
+    )
     # parse_known_args: an app bundle launched via LaunchServices can be
     # handed extra arguments of its own, which shouldn't abort the sync.
     args, _ = parser.parse_known_args()
@@ -586,7 +639,7 @@ if __name__ == "__main__":
         log.info("Another sync is already running — skipping this run")
         sys.exit(0)
     try:
-        main(dry_run=args.dry_run)
+        main(dry_run=args.dry_run, allow_mass_delete=args.allow_mass_delete)
     except httpx.TransportError:
         # No response reached us at all (DNS failure, connection refused,
         # timed out, etc.) — treat this as "internet unavailable" rather

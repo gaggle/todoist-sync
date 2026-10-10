@@ -35,12 +35,16 @@ turned out to clutter every synced item's notes field.
      what keeps sync fast as your history of completed tasks grows — but
      their ids are still remembered, so uncompleting one later resumes
      syncing it instead of creating a duplicate.
-  4. Drops any pair whose reminder and/or task has been deleted, once
-     that's been confirmed for `SYNC_PRUNE_MISSING_AFTER_CHECKS` consecutive
-     runs (4 by default — about an hour at the 15-minute sync interval).
-     Unlike archiving, a deleted item has nothing left to reactivate (ids
-     are never reused), so it's removed from `state.json` outright rather
-     than kept around.
+  4. Mirrors removals: once a reminder or task has been gone from its
+     container for `SYNC_PRUNE_MISSING_AFTER_CHECKS` consecutive runs (4 by
+     default — about an hour at the 15-minute sync interval), whether
+     deleted or moved to another list/project, its counterpart is deleted
+     from the other side and the pair is dropped from `state.json`. If more
+     than 3 *open* items vanish from one side in the same run, nothing is
+     deleted — that looks like a glitch (e.g. a full iCloud resync changing
+     reminder ids) rather than tidying up — and a notification asks you to
+     check; run once with `--allow-mass-delete` if it was intended.
+     Completed items don't count toward that limit.
 - The Reminders side talks to EventKit through a small compiled Swift
   helper (`swift/reminders-bridge`), not AppleScript. AppleScript's
   Reminders support proved unreliable under testing — direct-by-name and

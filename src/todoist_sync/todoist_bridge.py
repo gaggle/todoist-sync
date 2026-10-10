@@ -122,3 +122,7 @@ class TodoistBridge:
     def uncomplete_task(self, task_id: str) -> None:
         log.debug("Uncompleting Todoist task %s", task_id)
         self.api.uncomplete_task(task_id)
+
+    def delete_task(self, task_id: str) -> None:
+        log.debug("Deleting Todoist task %s", task_id)
+        self.api.delete_task(task_id)

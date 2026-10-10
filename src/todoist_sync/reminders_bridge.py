@@ -132,3 +132,6 @@ class RemindersBridge:
         if all_day:
             args.append("--all-day")
         return json.loads(_run(*args))["ok"]
+
+    def delete_reminder(self, reminder_id: str) -> bool:
+        return json.loads(_run("delete", "--list", self.list_name, "--id", reminder_id))["ok"]
