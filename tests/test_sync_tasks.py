@@ -359,3 +359,16 @@ def test_body_change_on_todoist_propagates_to_reminders(env):
     env.run()
 
     assert env.store.reminders[rid]["body"] == "New notes"
+
+
+def test_differently_named_containers_are_opened_on_their_own_side(env, monkeypatch):
+    from todoist_sync import sync_tasks
+
+    monkeypatch.setattr(sync_tasks, "REMINDERS_LIST", "Chores")
+    monkeypatch.setattr(sync_tasks, "TODOIST_PROJECT", "Family Project")
+    monkeypatch.setattr(sync_tasks, "CREATE_TODOIST_PROJECT", False)
+
+    env.run()
+
+    assert env.store.opened_list == "Chores"
+    assert env.store.opened_project == ("Family Project", False)

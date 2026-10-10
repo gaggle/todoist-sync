@@ -44,7 +44,25 @@ def _load_from_keychain() -> str | None:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return None
 
-LIST_NAME = os.environ.get("SYNC_LIST_NAME", "Siri Sync")
+def resolve_container_names(environ) -> tuple[str, str, bool]:
+    """Returns (reminders_list, todoist_project, create_todoist_project).
+
+    SYNC_LIST_NAME names both sides by default. SYNC_REMINDERS_LIST and
+    SYNC_TODOIST_PROJECT override one side each, for pairing containers
+    that are named differently (e.g. a "Chores" list with a shared "Family
+    Project"). A project named explicitly must already exist — it's never
+    auto-created, so a typo fails loudly instead of quietly spawning a stray
+    project next to a shared one."""
+    list_name = environ.get("SYNC_LIST_NAME") or "Siri Sync"
+    explicit_project = environ.get("SYNC_TODOIST_PROJECT")
+    return (
+        environ.get("SYNC_REMINDERS_LIST") or list_name,
+        explicit_project or list_name,
+        not explicit_project,
+    )
+
+
+REMINDERS_LIST, TODOIST_PROJECT, CREATE_TODOIST_PROJECT = resolve_container_names(os.environ)
 
 VAR_DIR = PROJECT_ROOT / "var"
 VAR_DIR.mkdir(exist_ok=True)

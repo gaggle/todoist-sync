@@ -40,6 +40,8 @@ class FakeStore:
     tasks: dict = field(default_factory=dict)
     _next_reminder_id: int = 1
     _next_task_id: int = 1
+    opened_list: str | None = None
+    opened_project: tuple[str, bool] | None = None
 
     def add_reminder(self, name="Reminder", body="", completed=False, due=None, all_day=False, id=None):
         rid = id or f"r{self._next_reminder_id}"
@@ -65,6 +67,7 @@ class FakeStore:
 class FakeRemindersBridge:
     def __init__(self, list_name):
         self.list_name = list_name
+        STORE.opened_list = list_name
 
     def get_reminders(self):
         return [dict(r) for r in STORE.reminders.values()]
@@ -102,7 +105,8 @@ class FakeTodoistBridge:
     def __init__(self, api_token):
         self.api_token = api_token
 
-    def get_or_create_project(self, name):
+    def get_or_create_project(self, name, create=True):
+        STORE.opened_project = (name, create)
         return "project1"
 
     def get_active_tasks(self, project_id):
@@ -148,7 +152,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(sync_tasks, "RemindersBridge", FakeRemindersBridge)
     monkeypatch.setattr(sync_tasks, "TodoistBridge", FakeTodoistBridge)
     monkeypatch.setattr(sync_tasks, "STATE_PATH", state_path)
-    monkeypatch.setattr(sync_tasks, "LIST_NAME", "Test List")
+    monkeypatch.setattr(sync_tasks, "REMINDERS_LIST", "Test List")
+    monkeypatch.setattr(sync_tasks, "TODOIST_PROJECT", "Test List")
+    monkeypatch.setattr(sync_tasks, "CREATE_TODOIST_PROJECT", True)
     monkeypatch.setattr(sync_tasks, "TODOIST_API_KEY", "fake-token")
     monkeypatch.setattr(sync_tasks, "CONFLICT_WINNER", "reminders")
     monkeypatch.setattr(sync_tasks, "ARCHIVE_AFTER_DAYS", 180)

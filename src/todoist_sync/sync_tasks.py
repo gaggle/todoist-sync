@@ -17,16 +17,18 @@ from .config import (
     ARCHIVE_AFTER_DAYS,
     AUTH_FAILURE_MARKER,
     CONFLICT_WINNER,
-    LIST_NAME,
+    CREATE_TODOIST_PROJECT,
     LOCK_PATH,
     LOG_LEVEL,
     LOG_PATH,
     NETWORK_DOWN_MARKER,
     PRUNE_MISSING_AFTER_CHECKS,
     REMINDERS_ACCESS_MARKER,
+    REMINDERS_LIST,
     STATE_PATH,
     SYNC_FAILURE_MARKER,
     TODOIST_API_KEY,
+    TODOIST_PROJECT,
 )
 from .reminders_bridge import RemindersBridge, RemindersUnavailableError
 from .todoist_bridge import TodoistBridge
@@ -230,15 +232,17 @@ def main() -> None:
     log.info("todoist-sync v%s starting", __version__)
     config.validate()
     log.debug(
-        "config: list=%r conflict_winner=%r archive_after_days=%d prune_after_checks=%d",
-        LIST_NAME,
+        "config: reminders_list=%r todoist_project=%r conflict_winner=%r archive_after_days=%d "
+        "prune_after_checks=%d",
+        REMINDERS_LIST,
+        TODOIST_PROJECT,
         CONFLICT_WINNER,
         ARCHIVE_AFTER_DAYS,
         PRUNE_MISSING_AFTER_CHECKS,
     )
-    reminders = RemindersBridge(LIST_NAME)
+    reminders = RemindersBridge(REMINDERS_LIST)
     todoist = TodoistBridge(TODOIST_API_KEY)
-    project_id = todoist.get_or_create_project(LIST_NAME)
+    project_id = todoist.get_or_create_project(TODOIST_PROJECT, create=CREATE_TODOIST_PROJECT)
 
     pairs, archive = state.load_state(STATE_PATH)
     linked_reminder_ids = {p["reminder_id"] for p in pairs}
@@ -333,7 +337,7 @@ def main() -> None:
         state.save_state(STATE_PATH, pairs, archive)
 
     # 2. Reconcile already-linked pairs by id directly. Reminder lookups are
-    #    scoped to LIST_NAME on the Swift side (not just addressed by global
+    #    scoped to REMINDERS_LIST on the Swift side (not just addressed by global
     #    id) so a tampered or stale state.json entry can't read/mutate a
     #    reminder outside the intended list. Every field is resolved against
     #    the last-synced value recorded on the pair (not wall-clock "last

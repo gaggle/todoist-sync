@@ -17,6 +17,10 @@ log = logging.getLogger(__name__)
 _TASKS_URL = "https://api.todoist.com/api/v1/tasks"
 
 
+class TodoistProjectNotFoundError(RuntimeError):
+    """Raised when a project that must already exist can't be found."""
+
+
 class TodoistBridge:
     """Talks to the Todoist API for a single dedicated project."""
 
@@ -28,11 +32,13 @@ class TodoistBridge:
     def close(self) -> None:
         self._client.close()
 
-    def get_or_create_project(self, name: str) -> str:
+    def get_or_create_project(self, name: str, create: bool = True) -> str:
         for page in self.api.get_projects():
             for project in page:
                 if project.name == name:
                     return project.id
+        if not create:
+            raise TodoistProjectNotFoundError(f"Todoist project {name!r} not found")
         log.debug("Creating Todoist project %r (none found)", name)
         return self.api.add_project(name=name).id
 
