@@ -64,6 +64,13 @@ class FakeStore:
         return tid
 
 
+def _reject_dry_run_placeholder(item_id):
+    # The real Todoist API answers 400 for an id it can't parse — which is
+    # what a dry run's made-up ids are — so looking one up is always a bug.
+    if item_id.startswith("dry-run-"):
+        raise AssertionError(f"looked up dry-run placeholder id {item_id!r}")
+
+
 class FakeRemindersBridge:
     def __init__(self, list_name):
         self.list_name = list_name
@@ -73,6 +80,7 @@ class FakeRemindersBridge:
         return [dict(r) for r in STORE.reminders.values()]
 
     def get_reminder(self, reminder_id):
+        _reject_dry_run_placeholder(reminder_id)
         r = STORE.reminders.get(reminder_id)
         return dict(r) if r else None
 
@@ -114,6 +122,7 @@ class FakeTodoistBridge:
         return [t for t in STORE.tasks.values() if t.completed_at is None]
 
     def get_task(self, task_id, project_id):
+        _reject_dry_run_placeholder(task_id)
         return STORE.tasks.get(task_id)
 
     def create_task(self, project_id, content, description, due_dt=None, all_day=False):

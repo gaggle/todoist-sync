@@ -31,7 +31,7 @@ from .config import (
     TODOIST_API_KEY,
     TODOIST_PROJECT,
 )
-from .dry_run import DryRunReminders, DryRunTodoist
+from .dry_run import DryRunReminders, DryRunTodoist, is_placeholder_pair
 from .reminders_bridge import RemindersBridge, RemindersUnavailableError
 from .todoist_bridge import TodoistBridge
 
@@ -366,6 +366,8 @@ def main(dry_run: bool = False) -> None:
     to_archive = []
     to_prune = []
     for pair in pairs:
+        if dry_run and is_placeholder_pair(pair):
+            continue
         r = reminders.get_reminder(pair["reminder_id"])
         t = todoist.get_task(pair["task_id"], project_id)
         if r is None or t is None:

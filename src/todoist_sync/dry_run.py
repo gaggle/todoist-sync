@@ -17,6 +17,14 @@ import logging
 log = logging.getLogger(__name__)
 
 _fake_ids = itertools.count(1)
+_PLACEHOLDER_PREFIX = "dry-run-"
+
+
+def is_placeholder_pair(pair: dict) -> bool:
+    """True for a pair whose item was only pretend-created in this dry run.
+    There's nothing on that side to look up, and its made-up id isn't one
+    the real APIs would accept."""
+    return pair["reminder_id"].startswith(_PLACEHOLDER_PREFIX) or pair["task_id"].startswith(_PLACEHOLDER_PREFIX)
 
 
 class _ReadThrough:
@@ -36,7 +44,7 @@ class DryRunReminders(_ReadThrough):
 
     def create_reminder(self, name, body, due_dt=None, all_day=False) -> str:
         log.info("DRY RUN: would create reminder %r (due %s)", name, due_dt)
-        return f"dry-run-reminder-{next(_fake_ids)}"
+        return f"{_PLACEHOLDER_PREFIX}reminder-{next(_fake_ids)}"
 
     def set_name(self, reminder_id, name) -> bool:
         log.info("DRY RUN: would rename reminder %s to %r", reminder_id, name)
@@ -64,7 +72,7 @@ class DryRunTodoist(_ReadThrough):
 
     def create_task(self, project_id, content, description, due_dt=None, all_day=False) -> str:
         log.info("DRY RUN: would create Todoist task %r (due %s)", content, due_dt)
-        return f"dry-run-task-{next(_fake_ids)}"
+        return f"{_PLACEHOLDER_PREFIX}task-{next(_fake_ids)}"
 
     def set_task_content(self, task_id, content) -> None:
         log.info("DRY RUN: would rename Todoist task %s to %r", task_id, content)
