@@ -69,11 +69,10 @@ VAR_DIR.mkdir(exist_ok=True)
 VAR_DIR.chmod(0o700)
 STATE_PATH = VAR_DIR / "state.json"
 LOG_PATH = VAR_DIR / "sync.log"
-NETWORK_DOWN_MARKER = VAR_DIR / "network-down-since"
-AUTH_FAILURE_MARKER = VAR_DIR / "auth-failure-since"
-REMINDERS_ACCESS_MARKER = VAR_DIR / "reminders-access-down-since"
-SYNC_FAILURE_MARKER = VAR_DIR / "sync-failure-since"
-MASS_DELETE_MARKER = VAR_DIR / "mass-delete-held-since"
+# Present = circuit breaker open: syncing is paused until a human removes
+# it. Lives in var/ rather than /tmp, which macOS clears on reboot — that
+# would quietly resume a sync that was stopped for a reason.
+BREAKER_PATH = VAR_DIR / "circuit-breaker-open"
 LOCK_PATH = VAR_DIR / "sync.lock"
 
 # TODOIST_API_KEY/CONFLICT_WINNER are read leniently here (no raise) and

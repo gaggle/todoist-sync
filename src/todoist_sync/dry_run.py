@@ -67,7 +67,7 @@ class DryRunReminders(_ReadThrough):
         return True
 
     def delete_reminder(self, reminder_id) -> bool:
-        log.info("DRY RUN: would delete reminder %s", reminder_id)
+        log.debug("DRY RUN: skipped deleting reminder %s", reminder_id)
         return True
 
 
@@ -94,4 +94,4 @@ class DryRunTodoist(_ReadThrough):
         log.info("DRY RUN: would set Todoist task %s due to %s (all_day=%s)", task_id, due_dt, all_day)
 
     def delete_task(self, task_id) -> None:
-        log.info("DRY RUN: would delete Todoist task %s", task_id)
+        log.debug("DRY RUN: skipped deleting Todoist task %s", task_id)

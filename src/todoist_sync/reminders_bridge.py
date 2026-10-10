@@ -84,6 +84,12 @@ def _row_to_reminder(row: dict) -> dict:
     }
 
 
+def create_alert_reminder(title: str, body: str) -> str:
+    """A high-priority reminder, due right away, in the user's default
+    Reminders list (not the synced one), so a problem reaches every device."""
+    return json.loads(_run("alert", "--name", title, "--body", body))["id"]
+
+
 class RemindersBridge:
     """Talks to macOS Reminders.app via a compiled Swift/EventKit helper.
 

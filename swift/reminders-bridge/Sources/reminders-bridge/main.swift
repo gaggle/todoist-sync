@@ -325,6 +325,30 @@ case "set-due":
         printJSON(["ok": false])
     }
 
+case "alert":
+    // A loud reminder in the user's default list — deliberately not the
+    // synced one — so a stopped sync gets noticed on every device: high
+    // priority, due a minute from now, with an alarm at the due time.
+    guard let cal = store.defaultCalendarForNewReminders() else {
+        eprint("no default Reminders list")
+        exit(1)
+    }
+    let alert = EKReminder(eventStore: store)
+    alert.calendar = cal
+    alert.title = opts.opt("name") ?? "Todoist Sync stopped"
+    alert.notes = opts.opt("body") ?? ""
+    alert.priority = 1
+    let due = Date().addingTimeInterval(60)
+    alert.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
+    alert.addAlarm(EKAlarm(absoluteDate: due))
+    do {
+        try store.save(alert, commit: true)
+        printJSON(["id": alert.calendarItemIdentifier])
+    } catch {
+        eprint("save failed: \(error)")
+        exit(1)
+    }
+
 case "delete":
     guard let listName = opts.opt("list"), let id = opts.opt("id"),
           let item = findReminder(id: id, inList: listName)

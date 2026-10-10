@@ -8,7 +8,7 @@ import logging.handlers
 import subprocess
 import sys
 from datetime import datetime, time, timedelta
-from pathlib import Path
+from time import sleep as _sleep
 
 import httpx
 
@@ -16,31 +16,27 @@ from . import config, state
 from . import __version__
 from .config import (
     ARCHIVE_AFTER_DAYS,
-    AUTH_FAILURE_MARKER,
+    BREAKER_PATH,
     CONFLICT_WINNER,
     CREATE_TODOIST_PROJECT,
     LOCK_PATH,
     LOG_LEVEL,
     LOG_PATH,
-    MASS_DELETE_MARKER,
-    NETWORK_DOWN_MARKER,
     PRUNE_MISSING_AFTER_CHECKS,
-    REMINDERS_ACCESS_MARKER,
     REMINDERS_LIST,
     STATE_PATH,
-    SYNC_FAILURE_MARKER,
     TODOIST_API_KEY,
     TODOIST_PROJECT,
 )
 from .dry_run import DryRunReminders, DryRunTodoist, is_placeholder_pair
-from .reminders_bridge import RemindersBridge, RemindersUnavailableError
+from .reminders_bridge import RemindersBridge, create_alert_reminder
 from .todoist_bridge import TodoistBridge
 
-_NOTIFY_THROTTLE = timedelta(hours=1)
 # More open items than this confirmed gone from one side in a single run
 # is treated as a glitch rather than a tidy-up; see step 4 in main().
 _MAX_OPEN_DELETES_PER_RUN = 3
-_FAILURE_MARKERS = (NETWORK_DOWN_MARKER, AUTH_FAILURE_MARKER, REMINDERS_ACCESS_MARKER, SYNC_FAILURE_MARKER)
+# Seconds to wait before each retry of a run that hit a transient error.
+_RETRY_DELAYS = (10, 60)
 
 _MAX_LOG_BYTES = 1_000_000  # 1 MB per file
 _LOG_BACKUP_COUNT = 3
@@ -95,28 +91,52 @@ def _notify_macos(title: str, message: str) -> None:
     subprocess.run(["/usr/bin/osascript", "-e", script], check=False)
 
 
-def _notify_once(marker: Path, title: str, message: str) -> None:
-    """Notifies via macOS banner, throttled per-marker to once per
-    _NOTIFY_THROTTLE so a persistent failure (offline for hours, an
-    expired token nobody's noticed yet) doesn't spam a banner every 15
-    minutes. The marker also records that this failure category is
-    currently active, so a subsequent success can clear it."""
-    now = datetime.now()
-    last = None
-    if marker.exists():
-        try:
-            last = datetime.fromisoformat(marker.read_text().strip())
-        except ValueError:
-            last = None
-    if last is None or now - last > _NOTIFY_THROTTLE:
-        _notify_macos(title, message)
-    marker.write_text(now.isoformat())
+class MassDeleteError(RuntimeError):
+    """More open items vanished from one side in a single run than a person
+    plausibly removed by hand. Deliberately unhandled: it trips the circuit
+    breaker, so a human looks before anything gets deleted."""
 
 
-def _clear_failure_markers() -> None:
-    for marker in _FAILURE_MARKERS:
-        if marker.exists():
-            marker.unlink()
+def _is_transient(exc: Exception) -> bool:
+    """Worth retrying: no response at all (offline, DNS, timeout), rate
+    limiting, or a server-side error. Anything else needs a human."""
+    if isinstance(exc, httpx.TransportError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return status == 429 or status >= 500
+    return False
+
+
+def _describe(exc: Exception) -> str:
+    # An HTTPStatusError's message is mostly its URL (task ids); the status
+    # code is the useful, non-personal part. The body stays at DEBUG.
+    if isinstance(exc, httpx.HTTPStatusError):
+        log.debug("Response body: %s", exc.response.text[:200])
+        return f"HTTP {exc.response.status_code}"
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _raise_alarm(reason: str) -> None:
+    """Gets a stopped sync noticed: a Mac notification, plus a high-priority
+    reminder in the default Reminders list so it reaches the phone too."""
+    _notify_macos("Todoist Sync stopped", f"{reason} — paused until you check {LOG_PATH}")
+    try:
+        create_alert_reminder(
+            "Todoist Sync stopped — check the Mac",
+            f"{reason}\n\nSyncing is paused. Details: {LOG_PATH}\nTo resume once fixed: rm {BREAKER_PATH}",
+        )
+    except Exception:
+        # The failure may well be Reminders access itself; never let the
+        # alarm mask the error that tripped the breaker.
+        log.exception("Couldn't create the alert reminder")
+
+
+def _trip_breaker(exc: Exception) -> None:
+    reason = _describe(exc)
+    BREAKER_PATH.write_text(f"{datetime.now().isoformat(timespec='seconds')} {reason}\n")
+    log.error("Circuit breaker opened — syncing is paused until %s is removed", BREAKER_PATH)
+    _raise_alarm(reason)
 
 
 def _acquire_lock():
@@ -238,7 +258,7 @@ def _skip_save_state(*_args) -> None:
     pass
 
 
-def main(dry_run: bool = False, allow_mass_delete: bool = False) -> None:
+def main(dry_run: bool = False) -> None:
     log.info("todoist-sync v%s starting%s", __version__, " (dry run: nothing will be written)" if dry_run else "")
     config.validate()
     log.debug(
@@ -543,35 +563,32 @@ def main(dry_run: bool = False, allow_mass_delete: bool = False) -> None:
     #    Brake: lots of *open* items vanishing at once looks less like
     #    tidying up than like a glitch — e.g. a full iCloud resync, which
     #    Apple documents can change every reminder's id — and mirroring
-    #    that would wipe the shared project. Above the limit nothing is
-    #    deleted (the pairs stay, re-checked every run) until a run with
-    #    --allow-mass-delete. Completed items don't count: clearing out a
+    #    that would wipe the shared project. Above the limit, nothing is
+    #    deleted: MassDeleteError trips the circuit breaker so a human
+    #    looks first. Completed items don't count: clearing out a
     #    ticked-off list is routine.
     open_removals = sum(1 for pair, survivor in to_prune if survivor and not pair.get("completed"))
-    if open_removals > _MAX_OPEN_DELETES_PER_RUN and not allow_mass_delete:
-        log.warning(
-            "Holding back deletion of %d open item(s) that vanished from one side at once (limit %d) "
-            "— run once with --allow-mass-delete if that was intended",
-            open_removals,
-            _MAX_OPEN_DELETES_PER_RUN,
+    if open_removals > _MAX_OPEN_DELETES_PER_RUN:
+        raise MassDeleteError(
+            f"{open_removals} open items vanished from one side in a single run "
+            f"(limit {_MAX_OPEN_DELETES_PER_RUN}) — nothing was deleted"
         )
-        if not dry_run:
-            _notify_once(
-                MASS_DELETE_MARKER,
-                "Todoist Sync",
-                f"{open_removals} open items vanished from one side at once — not deleting them. Check the log.",
-            )
-        to_prune = [(pair, survivor) for pair, survivor in to_prune if survivor is None]
-    elif MASS_DELETE_MARKER.exists() and not dry_run:
-        MASS_DELETE_MARKER.unlink()
 
     removals_mirrored = 0
     for pair, survivor in to_prune:
-        if survivor == "reminder":
-            reminders.delete_reminder(pair["reminder_id"])
-            removals_mirrored += 1
-        elif survivor == "task":
-            todoist.delete_task(pair["task_id"])
+        if survivor is not None:
+            # At INFO with the title: the log is the record of what was
+            # deleted, should anything need recreating by hand.
+            log.info(
+                "%s removal of %r: deleting the %s",
+                "DRY RUN: would mirror" if dry_run else "Mirroring",
+                pair.get("name"),
+                "reminder" if survivor == "reminder" else "Todoist task",
+            )
+            if survivor == "reminder":
+                reminders.delete_reminder(pair["reminder_id"])
+            else:
+                todoist.delete_task(pair["task_id"])
             removals_mirrored += 1
         log.debug(
             "Pair %s: pruned (missing for %d consecutive checks; deleted the %s)",
@@ -582,7 +599,6 @@ def main(dry_run: bool = False, allow_mass_delete: bool = False) -> None:
         pairs.remove(pair)
 
     save_state(STATE_PATH, pairs, archive)
-    _clear_failure_markers()
 
     if not any(
         (
@@ -619,68 +635,60 @@ def main(dry_run: bool = False, allow_mass_delete: bool = False) -> None:
     todoist.close()
 
 
-if __name__ == "__main__":
+def run(argv: list[str] | None = None) -> int:
+    """One scheduled (or manual) sync, guarded by a circuit breaker.
+
+    The breaker is a file: absent means closed (sync runs), present means
+    open — something unexpected happened and a human has to look before
+    syncing resumes (remove the file to close it). Transient errors are
+    retried with backoff and never trip it; anything else does, raises the
+    alarm, and re-raises so the run crashes visibly. A dry run writes
+    nothing, so it neither respects nor trips the breaker — it's the tool
+    for diagnosing what tripped it.
+    """
     parser = argparse.ArgumentParser(prog="todoist-sync")
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="read both sides and log what would change, without writing anything",
     )
-    parser.add_argument(
-        "--allow-mass-delete",
-        action="store_true",
-        help=f"mirror removals even when more than {_MAX_OPEN_DELETES_PER_RUN} open items vanished at once",
-    )
     # parse_known_args: an app bundle launched via LaunchServices can be
     # handed extra arguments of its own, which shouldn't abort the sync.
-    args, _ = parser.parse_known_args()
+    args, _ = parser.parse_known_args(argv)
+
+    if not args.dry_run and BREAKER_PATH.exists():
+        log.warning(
+            "Circuit breaker is open (%s) — not syncing. Fix the cause, then resume with: rm %s",
+            BREAKER_PATH.read_text().strip(),
+            BREAKER_PATH,
+        )
+        return 1
+
     lock_file = _acquire_lock()
     if lock_file is None:
         log.info("Another sync is already running — skipping this run")
-        sys.exit(0)
+        return 0
     try:
-        main(dry_run=args.dry_run, allow_mass_delete=args.allow_mass_delete)
-    except httpx.TransportError:
-        # No response reached us at all (DNS failure, connection refused,
-        # timed out, etc.) — treat this as "internet unavailable" rather
-        # than a real sync bug, and surface it since this runs headless via
-        # launchd with no other visible output.
-        log.warning("Sync failed: no internet connection")
-        _notify_once(NETWORK_DOWN_MARKER, "Todoist Sync", "No internet connection — sync skipped.")
-        sys.exit(1)
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 401:
-            # An expired/revoked token would otherwise retry silently
-            # forever, logged but never actually noticed.
-            log.warning("Sync failed: Todoist API token invalid or expired")
-            _notify_once(
-                AUTH_FAILURE_MARKER,
-                "Todoist Sync",
-                "Todoist API token invalid or expired — check config.env.",
-            )
-        else:
-            # HTTPStatusError's own message is just "<status> for url:
-            # <url>" — the actual reason (validation error, rate limit
-            # detail, etc.) is in the response body and would otherwise
-            # never reach the log. Log only the status code at WARNING
-            # (the default level) so personal task content echoed back in
-            # a validation error doesn't land in the routine log; the
-            # full body is available at DEBUG for troubleshooting.
-            log.warning("Sync failed: HTTP %d", e.response.status_code)
-            log.debug("Response body: %s", e.response.text[:200])
-            _notify_once(
-                SYNC_FAILURE_MARKER,
-                "Todoist Sync",
-                f"Sync failed: Todoist returned HTTP {e.response.status_code}.",
-            )
-        sys.exit(1)
-    except RemindersUnavailableError as e:
-        log.warning("Sync failed: %s", e)
-        _notify_once(REMINDERS_ACCESS_MARKER, "Todoist Sync", str(e))
-        sys.exit(1)
-    except Exception:
-        log.exception("Sync failed")
-        _notify_once(SYNC_FAILURE_MARKER, "Todoist Sync", "Sync failed unexpectedly — check the log.")
-        sys.exit(1)
+        for delay in (*_RETRY_DELAYS, None):
+            try:
+                main(dry_run=args.dry_run)
+                return 0
+            except Exception as e:
+                if not _is_transient(e):
+                    raise
+                if delay is None:
+                    log.warning("Sync failed: %s, still after %d retries — leaving it to the next run", _describe(e), len(_RETRY_DELAYS))
+                    return 1
+                log.warning("Sync failed: %s — retrying in %ds", _describe(e), delay)
+                _sleep(delay)
+    except Exception as e:
+        log.exception("Sync failed unexpectedly")
+        if not args.dry_run:
+            _trip_breaker(e)
+        raise
     finally:
         lock_file.close()
+
+
+if __name__ == "__main__":
+    sys.exit(run())

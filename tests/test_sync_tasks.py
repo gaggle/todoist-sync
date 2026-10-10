@@ -488,7 +488,9 @@ def test_reminder_gone_from_its_list_deletes_its_task_once_confirmed(env, monkey
     assert env.load_state() == ([], [])
 
 
-def test_more_open_removals_than_the_limit_are_held_back_and_notified(env, monkeypatch):
+def test_more_open_removals_than_the_limit_raise_and_delete_nothing(env, monkeypatch):
+    import pytest
+
     import todoist_sync.sync_tasks as sync_tasks
 
     monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 1)
@@ -496,26 +498,10 @@ def test_more_open_removals_than_the_limit_are_held_back_and_notified(env, monke
     for rid, _ in _open_pairs(env, 3):
         del env.store.reminders[rid]
 
-    env.run()
+    with pytest.raises(sync_tasks.MassDeleteError):
+        env.run()
 
     assert len(env.store.tasks) == 3
-    pairs, _ = env.load_state()
-    assert len(pairs) == 3
-    assert len(env.notifications) == 1
-
-
-def test_allow_mass_delete_lets_a_held_back_batch_through(env, monkeypatch):
-    import todoist_sync.sync_tasks as sync_tasks
-
-    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 1)
-    monkeypatch.setattr(sync_tasks, "_MAX_OPEN_DELETES_PER_RUN", 2)
-    for rid, _ in _open_pairs(env, 3):
-        del env.store.reminders[rid]
-
-    env.run(allow_mass_delete=True)
-
-    assert env.store.tasks == {}
-    assert env.load_state() == ([], [])
 
 
 def test_completed_items_do_not_count_toward_the_mass_delete_limit(env, monkeypatch):
@@ -529,7 +515,6 @@ def test_completed_items_do_not_count_toward_the_mass_delete_limit(env, monkeypa
     env.run()
 
     assert env.store.tasks == {}
-    assert env.notifications == []
 
 
 def test_dry_run_only_logs_the_deletion(env, monkeypatch, caplog):
@@ -543,4 +528,17 @@ def test_dry_run_only_logs_the_deletion(env, monkeypatch, caplog):
         env.run(dry_run=True)
 
     assert rid in env.store.reminders
-    assert f"DRY RUN: would delete reminder {rid}" in caplog.text
+    assert "DRY RUN: would mirror removal of 'Item 0': deleting the reminder" in caplog.text
+
+
+def test_mirrored_deletion_is_logged_with_its_title(env, monkeypatch, caplog):
+    import todoist_sync.sync_tasks as sync_tasks
+
+    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 1)
+    [(rid, _)] = _open_pairs(env, 1)
+    del env.store.reminders[rid]
+
+    with caplog.at_level("INFO"):
+        env.run()
+
+    assert "Mirroring removal of 'Item 0': deleting the Todoist task" in caplog.text

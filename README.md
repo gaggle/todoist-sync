@@ -42,9 +42,8 @@ turned out to clutter every synced item's notes field.
      from the other side and the pair is dropped from `state.json`. If more
      than 3 *open* items vanish from one side in the same run, nothing is
      deleted — that looks like a glitch (e.g. a full iCloud resync changing
-     reminder ids) rather than tidying up — and a notification asks you to
-     check; run once with `--allow-mass-delete` if it was intended.
-     Completed items don't count toward that limit.
+     reminder ids) rather than tidying up — and the run fails, tripping the
+     circuit breaker (below). Completed items don't count toward that limit.
 - The Reminders side talks to EventKit through a small compiled Swift
   helper (`swift/reminders-bridge`), not AppleScript. AppleScript's
   Reminders support proved unreliable under testing — direct-by-name and
@@ -52,6 +51,25 @@ turned out to clutter every synced item's notes field.
   EventKit is Apple's proper, documented framework for Reminders and has
   been reliable in comparison; the Todoist side stays in Python since the
   `todoist-api-python` SDK already covers it well.
+
+## When something goes wrong: the circuit breaker
+
+Transient failures — offline, timeouts, Todoist rate limiting or server
+errors — are retried within the run (after 10s, then 60s) and otherwise
+left to the next scheduled run. Anything else (a bug, a revoked token,
+lost Reminders access, a mass removal) **opens the circuit breaker**: the
+error and traceback go to `var/sync.log`, the reason is written to
+`var/circuit-breaker-open`, a Mac notification appears, and a
+high-priority reminder lands in your default Reminders list so the phone
+hears about it too. Every run after that just logs a warning and stops,
+until you've looked, fixed the cause, and removed the file:
+
+```bash
+rm var/circuit-breaker-open
+```
+
+`--dry-run` ignores the breaker (it writes nothing), which makes it the
+tool for seeing what tripped it.
 
 ## Known limitations
 

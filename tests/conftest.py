@@ -178,24 +178,16 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(sync_tasks, "CONFLICT_WINNER", "reminders")
     monkeypatch.setattr(sync_tasks, "ARCHIVE_AFTER_DAYS", 180)
     monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 4)
-    monkeypatch.setattr(sync_tasks, "_FAILURE_MARKERS", ())
     monkeypatch.setattr(sync_tasks.config, "validate", lambda: None)
-    monkeypatch.setattr(sync_tasks, "MASS_DELETE_MARKER", tmp_path / "mass-delete-held-since")
-    notifications = []
-    monkeypatch.setattr(sync_tasks, "_notify_once", lambda marker, title, message: notifications.append(message))
 
     class Env:
         store = STORE
 
-        def run(self, dry_run=False, allow_mass_delete=False):
-            sync_tasks.main(dry_run=dry_run, allow_mass_delete=allow_mass_delete)
+        def run(self, dry_run=False):
+            sync_tasks.main(dry_run=dry_run)
 
         def load_state(self):
             return state_module.load_state(state_path)
-
-        @property
-        def notifications(self):
-            return notifications
 
         def write_state(self, pairs, archive=None):
             state_module.save_state(state_path, pairs, archive or [])
