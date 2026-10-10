@@ -1,6 +1,5 @@
 #!/bin/bash
-# __PROJECT_ROOT__ is substituted by install.sh when this is copied into
-# the todoist-sync.app bundle — its location relative to the project root
-# changes based on nesting depth, so a baked-in absolute path is more
-# robust than BASH_SOURCE-relative traversal.
-exec "__PROJECT_ROOT__/.venv/bin/python" -m todoist_sync.sync_tasks "$@"
+# __PYTHON__ is substituted by build-app.sh when this is copied into the
+# todoist-sync.app bundle — an absolute interpreter path baked in at build
+# time is more robust than resolving it relative to the bundle's location.
+exec "__PYTHON__" -m todoist_sync.sync_tasks "$@"
