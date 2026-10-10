@@ -119,6 +119,7 @@ struct ReminderJSON: Codable {
     let due: String?
     let allDay: Bool
     let recurrence: String?
+    let section: String?
 }
 
 // A compact, RRULE-style rendering of a reminder's repeat rules (e.g.
@@ -155,7 +156,7 @@ func describeRecurrence(_ rules: [EKRecurrenceRule]?) -> String? {
     }.joined(separator: " | ")
 }
 
-func toJSON(_ r: EKReminder) -> ReminderJSON {
+func toJSON(_ r: EKReminder, section: String?) -> ReminderJSON {
     var due: String? = nil
     var allDay = false
     if let comps = r.dueDateComponents {
@@ -169,7 +170,8 @@ func toJSON(_ r: EKReminder) -> ReminderJSON {
         completed: r.isCompleted,
         due: due,
         allDay: allDay,
-        recurrence: describeRecurrence(r.recurrenceRules)
+        recurrence: describeRecurrence(r.recurrenceRules),
+        section: section
     )
 }
 
@@ -247,16 +249,14 @@ case "get-reminders":
         print("[]")
         break
     }
-    printJSON(fetchReminders(in: cal).map(toJSON))
-
-case "get-reminder":
-    guard let listName = opts.opt("list"), let id = opts.opt("id"),
-          let item = findReminder(id: id, inList: listName)
-    else {
-        print("null")
-        break
-    }
-    printJSON(toJSON(item))
+    let reminders = fetchReminders(in: cal)
+    // Sections come from ReminderKit, one lookup per reminder — skipped
+    // outright for a list that has none.
+    let sections = ListSections(calendar: cal)
+    let hasSections = !sections.all().isEmpty
+    printJSON(reminders.map {
+        toJSON($0, section: hasSections ? sections.sectionName(ofReminder: $0.calendarItemIdentifier) : nil)
+    })
 
 case "create-reminder":
     guard let listName = opts.opt("list"), let cal = findCalendar(named: listName, createIfMissing: true) else {
@@ -358,6 +358,17 @@ case "set-due":
         eprint("save failed: \(error)")
         printJSON(["ok": false])
     }
+
+case "set-section":
+    // --section "" takes the reminder out of any section.
+    guard let listName = opts.opt("list"), let id = opts.opt("id"),
+          let item = findReminder(id: id, inList: listName), let name = opts.opt("section")
+    else {
+        printJSON(["ok": false])
+        break
+    }
+    ListSections(calendar: item.calendar).move(reminder: item.calendarItemIdentifier, to: name.isEmpty ? nil : name)
+    printJSON(["ok": true])
 
 case "alert":
     // A loud reminder in the user's default list — deliberately not the

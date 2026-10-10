@@ -33,6 +33,8 @@ class FakeTask:
     description: str = ""
     due: FakeDue | None = None
     completed_at: datetime | None = None
+    # The fake keeps a section's name as its id.
+    section_id: str | None = None
 
 
 @dataclass
@@ -45,7 +47,7 @@ class FakeStore:
     opened_project: tuple[str, bool] | None = None
 
     def add_reminder(
-        self, name="Reminder", body="", completed=False, due=None, all_day=False, id=None, recurrence=None
+        self, name="Reminder", body="", completed=False, due=None, all_day=False, id=None, recurrence=None, section=None
     ):
         rid = id or f"r{self._next_reminder_id}"
         self._next_reminder_id += 1
@@ -57,14 +59,15 @@ class FakeStore:
             "due": due,
             "all_day": all_day,
             "recurrence": recurrence,
+            "section": section,
         }
         return rid
 
-    def add_task(self, content="Task", description="", due=None, completed=False, id=None):
+    def add_task(self, content="Task", description="", due=None, completed=False, id=None, section=None):
         tid = id or f"t{self._next_task_id}"
         self._next_task_id += 1
         completed_at = datetime(2026, 1, 1) if completed else None
-        self.tasks[tid] = FakeTask(tid, content, description, due, completed_at)
+        self.tasks[tid] = FakeTask(tid, content, description, due, completed_at, section)
         return tid
 
 
@@ -111,6 +114,10 @@ class FakeRemindersBridge:
         del STORE.reminders[reminder_id]
         return True
 
+    def set_section(self, reminder_id, name):
+        STORE.reminders[reminder_id]["section"] = name
+        return True
+
 
 class FakeTodoistBridge:
     def __init__(self, api_token):
@@ -128,9 +135,15 @@ class FakeTodoistBridge:
         _reject_dry_run_placeholder(task_id)
         return STORE.tasks.get(task_id)
 
-    def create_task(self, project_id, content, description, due_dt=None, all_day=False):
+    def create_task(self, project_id, content, description, due_dt=None, all_day=False, section=None):
         due = FakeDue(due_dt.date() if (due_dt and all_day) else due_dt) if due_dt else None
-        return STORE.add_task(content=content, description=description, due=due)
+        return STORE.add_task(content=content, description=description, due=due, section=section)
+
+    def section_name(self, project_id, section_id):
+        return section_id
+
+    def move_to_section(self, task_id, project_id, name):
+        STORE.tasks[task_id].section_id = name
 
     def set_task_due(self, task_id, due_dt, all_day):
         was_recurring = STORE.tasks[task_id].due.is_recurring if STORE.tasks[task_id].due else False

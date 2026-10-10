@@ -66,16 +66,20 @@ class DryRunReminders(_ReadThrough):
         log.info("DRY RUN: would set reminder %s due to %s (all_day=%s)", reminder_id, due_dt, all_day)
         return True
 
+    def set_section(self, reminder_id, name) -> bool:
+        log.info("DRY RUN: would move reminder %s to section %r", reminder_id, name)
+        return True
+
     def delete_reminder(self, reminder_id) -> bool:
         log.debug("DRY RUN: skipped deleting reminder %s", reminder_id)
         return True
 
 
 class DryRunTodoist(_ReadThrough):
-    _reads = frozenset({"get_active_tasks", "get_task", "close"})
+    _reads = frozenset({"get_active_tasks", "get_task", "section_name", "close"})
 
-    def create_task(self, project_id, content, description, due_dt=None, all_day=False) -> str:
-        log.info("DRY RUN: would create Todoist task %r (due %s)", content, due_dt)
+    def create_task(self, project_id, content, description, due_dt=None, all_day=False, section=None) -> str:
+        log.info("DRY RUN: would create Todoist task %r (due %s, section %r)", content, due_dt, section)
         return f"{_PLACEHOLDER_PREFIX}task-{next(_fake_ids)}"
 
     def set_task_content(self, task_id, content) -> None:
@@ -83,6 +87,9 @@ class DryRunTodoist(_ReadThrough):
 
     def set_task_description(self, task_id, description) -> None:
         log.info("DRY RUN: would update description of Todoist task %s", task_id)
+
+    def move_to_section(self, task_id, project_id, name) -> None:
+        log.info("DRY RUN: would move Todoist task %s to section %r", task_id, name)
 
     def complete_task(self, task_id) -> None:
         log.info("DRY RUN: would complete Todoist task %s", task_id)

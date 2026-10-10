@@ -338,7 +338,9 @@ def main(dry_run: bool = False) -> None:
             continue
         if r["recurrence"]:
             _log_repeat_not_synced("reminder", r["name"], r["recurrence"])
-        task_id = todoist.create_task(project_id, r["name"], r["body"], r["due"], r["all_day"])
+        task_id = todoist.create_task(
+            project_id, r["name"], r["body"], r["due"], r["all_day"], section=r["section"]
+        )
         pairs.append(
             {
                 "reminder_id": r["id"],
@@ -348,6 +350,7 @@ def main(dry_run: bool = False) -> None:
                 "completed": False,
                 "name": r["name"],
                 "body": r["body"],
+                "section": r["section"],
             }
         )
         linked_task_ids.add(task_id)
@@ -375,7 +378,10 @@ def main(dry_run: bool = False) -> None:
             _log_repeat_not_synced("Todoist task", t.content, t.due.string)
         due_dt, all_day = _due_to_datetime(t.due)
         body = t.description or ""
+        section = todoist.section_name(project_id, t.section_id)
         reminder_id = reminders.create_reminder(t.content, body, due_dt, all_day)
+        if section is not None:
+            reminders.set_section(reminder_id, section)
         pairs.append(
             {
                 "reminder_id": reminder_id,
@@ -385,6 +391,7 @@ def main(dry_run: bool = False) -> None:
                 "completed": False,
                 "name": t.content,
                 "body": body,
+                "section": section,
             }
         )
         linked_reminder_ids.add(reminder_id)
@@ -406,6 +413,7 @@ def main(dry_run: bool = False) -> None:
     due_synced = 0
     name_synced = 0
     notes_synced = 0
+    sections_synced = 0
     now = datetime.now()
     to_archive = []
     to_prune = []
@@ -506,6 +514,24 @@ def main(dry_run: bool = False) -> None:
         pair["body"] = new_body
         if body_changed:
             notes_synced += 1
+
+        # Sections match by name: a Todoist board column and a Reminders list
+        # section of the same name are the same column, created on whichever
+        # side lacks it. A pair from before sections were synced has no
+        # baseline; taking the reminder's as one lets Todoist's columns,
+        # where they've been in use, flow over.
+        new_section, section_changed = _reconcile_scalar(
+            pair.get("section", r["section"]),
+            r["section"],
+            todoist.section_name(project_id, t.section_id),
+            set_todoist=lambda v: todoist.move_to_section(t.id, project_id, v),
+            set_reminders=lambda v: reminders.set_section(r["id"], v),
+            field_name="section",
+            pair_label=_pair_label(pair),
+        )
+        pair["section"] = new_section
+        if section_changed:
+            sections_synced += 1
 
         last_due = _deserialize_due(pair.get("due"))
         last_all_day = pair.get("all_day", False)
@@ -625,6 +651,7 @@ def main(dry_run: bool = False) -> None:
             due_synced,
             name_synced,
             notes_synced,
+            sections_synced,
             reactivated,
             to_archive,
             to_prune,
@@ -635,7 +662,8 @@ def main(dry_run: bool = False) -> None:
         log.info(
             "%sSync complete: %d reminder(s) -> Todoist, %d task(s) -> Reminders, "
             "%d completion(s) synced, %d due date(s) synced, %d title(s) synced, "
-            "%d note(s) synced, %d reactivated from archive, %d archived, %d removal(s) mirrored, %d pruned",
+            "%d note(s) synced, %d column(s) synced, %d reactivated from archive, %d archived, "
+            "%d removal(s) mirrored, %d pruned",
             "DRY RUN: " if dry_run else "",
             created_in_todoist,
             created_in_reminders,
@@ -643,6 +671,7 @@ def main(dry_run: bool = False) -> None:
             due_synced,
             name_synced,
             notes_synced,
+            sections_synced,
             reactivated,
             len(to_archive),
             removals_mirrored,

@@ -28,6 +28,7 @@ class TodoistBridge:
         self.api = TodoistAPI(api_token)
         self._token = api_token
         self._client = httpx.Client(timeout=30.0)
+        self._section_ids: dict[str, dict[str, str]] = {}
 
     def close(self) -> None:
         self._client.close()
@@ -84,6 +85,36 @@ class TodoistBridge:
             return None
         return task
 
+    def _sections(self, project_id: str) -> dict[str, str]:
+        """The project's sections, name -> id; fetched once per run."""
+        if project_id not in self._section_ids:
+            self._section_ids[project_id] = {
+                section.name: section.id for page in self.api.get_sections(project_id=project_id) for section in page
+            }
+        return self._section_ids[project_id]
+
+    def _section_id(self, project_id: str, name: str) -> str:
+        sections = self._sections(project_id)
+        if name not in sections:
+            log.debug("Creating Todoist section %r in project %s", name, project_id)
+            sections[name] = self.api.add_section(name=name, project_id=project_id).id
+        return sections[name]
+
+    def section_name(self, project_id: str, section_id: str | None) -> str | None:
+        if section_id is None:
+            return None
+        for name, known_id in self._sections(project_id).items():
+            if known_id == section_id:
+                return name
+        raise RuntimeError(f"Todoist section {section_id} isn't one of project {project_id}'s sections")
+
+    def move_to_section(self, task_id: str, project_id: str, name: str | None) -> None:
+        log.debug("Moving Todoist task %s to section %r", task_id, name)
+        if name is None:
+            self.api.move_task(task_id, project_id=project_id)
+        else:
+            self.api.move_task(task_id, section_id=self._section_id(project_id, name))
+
     def create_task(
         self,
         project_id: str,
@@ -91,10 +122,13 @@ class TodoistBridge:
         description: str,
         due_dt: datetime | None = None,
         all_day: bool = False,
+        section: str | None = None,
     ) -> str:
         kwargs = {}
         if due_dt is not None:
             kwargs = {"due_date": due_dt.date()} if all_day else {"due_datetime": due_dt}
+        if section is not None:
+            kwargs["section_id"] = self._section_id(project_id, section)
         log.debug("Creating Todoist task %r in project %s", content, project_id)
         return self.api.add_task(
             content=content, project_id=project_id, description=description, **kwargs

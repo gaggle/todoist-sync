@@ -39,9 +39,30 @@ class Bench:
     def add_task(self, content, **kwargs) -> str:
         return self.todoist.api.add_task(content=content, project_id=self.project_id, **kwargs).id
 
+    def todoist_sections(self) -> dict:
+        """Section id -> name, fetched fresh (the sync creates sections too)."""
+        return {s.id: s.name for page in self.todoist.api.get_sections(project_id=self.project_id) for s in page}
+
+    def task_section(self, title):
+        return self.todoist_sections().get(self.tasks()[title].section_id)
+
+    def move_task(self, title, section):
+        section_id = {name: id for id, name in self.todoist_sections().items()}.get(section) if section else None
+        if section and section_id is None:
+            section_id = self.todoist.api.add_section(name=section, project_id=self.project_id).id
+        task_id = self.tasks()[title].id
+        if section_id:
+            self.todoist.api.move_task(task_id, section_id=section_id)
+        else:
+            self.todoist.api.move_task(task_id, project_id=self.project_id)
+
     def empty(self) -> None:
         for task in self.todoist.get_active_tasks(self.project_id):
             self.todoist.delete_task(task.id)
+        # Todoist sections go too, so each scenario exercises creating them.
+        # The list's Reminders sections stay: the bridge only ever adds them.
+        for section_id in self.todoist_sections():
+            self.todoist.api.delete_section(section_id)
         for reminder in self.reminders.get_reminders():
             self.reminders.delete_reminder(reminder["id"])
 

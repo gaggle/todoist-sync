@@ -77,6 +77,7 @@ def _row_to_reminder(row: dict) -> dict:
         "due": datetime.fromisoformat(due) if due else None,
         "all_day": bool(row.get("allDay")),
         "recurrence": row.get("recurrence"),
+        "section": row.get("section"),
     }
 
 
@@ -133,3 +134,8 @@ class RemindersBridge:
 
     def delete_reminder(self, reminder_id: str) -> bool:
         return json.loads(_run("delete", "--list", self.list_name, "--id", reminder_id))["ok"]
+
+    def set_section(self, reminder_id: str, name: str | None) -> bool:
+        """Moves the reminder into the named section (created if the list
+        has none by that name), or with None out of any section."""
+        return json.loads(_run("set-section", "--list", self.list_name, "--id", reminder_id, "--section", name or ""))["ok"]

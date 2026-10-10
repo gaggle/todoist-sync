@@ -557,3 +557,76 @@ def test_mirrored_deletion_is_logged_with_its_title(env, monkeypatch, caplog):
         env.run()
 
     assert "Mirroring removal of 'Item 0': deleting the Todoist task" in caplog.text
+
+
+def test_reminder_in_a_section_creates_its_task_in_the_same_named_section(env):
+    env.store.add_reminder(name="Paint the fence", section="Now")
+
+    env.run()
+
+    [task] = env.store.tasks.values()
+    assert task.section_id == "Now"
+    pairs, _ = env.load_state()
+    assert pairs[0]["section"] == "Now"
+
+
+def test_task_in_a_section_creates_its_reminder_in_the_same_named_section(env):
+    env.store.add_task(content="Fix the gutter", section="Doing")
+
+    env.run()
+
+    [reminder] = env.store.reminders.values()
+    assert reminder["section"] == "Doing"
+
+
+def test_moving_a_reminder_to_another_section_moves_its_task(env):
+    rid, tid = _seeded_pair(env)
+    env.run()
+    env.store.reminders[rid]["section"] = "Doing"
+
+    env.run()
+
+    assert env.store.tasks[tid].section_id == "Doing"
+
+
+def test_moving_a_task_to_another_section_moves_its_reminder(env):
+    rid, tid = _seeded_pair(env)
+    env.store.tasks[tid].section_id = "Now"
+
+    env.run()
+
+    assert env.store.reminders[rid]["section"] == "Now"
+
+
+def test_taking_a_task_out_of_its_section_takes_its_reminder_out_too(env):
+    rid, tid = _seeded_pair(env)
+    env.store.reminders[rid]["section"] = env.store.tasks[tid].section_id = "Now"
+    env.run()
+
+    env.store.tasks[tid].section_id = None
+    env.run()
+
+    assert env.store.reminders[rid]["section"] is None
+
+
+def test_pair_from_before_sections_were_synced_adopts_its_tasks_section(env):
+    # _seeded_pair writes state without a "section" key, like pairs created
+    # before section sync existed.
+    rid, tid = _seeded_pair(env)
+    env.store.tasks[tid].section_id = "Ideas / Triage"
+
+    env.run()
+
+    assert env.store.reminders[rid]["section"] == "Ideas / Triage"
+
+
+def test_section_conflict_is_won_by_reminders_by_default(env):
+    rid, tid = _seeded_pair(env)
+    env.run()
+    env.store.reminders[rid]["section"] = "Now"
+    env.store.tasks[tid].section_id = "Doing"
+
+    env.run()
+
+    assert env.store.tasks[tid].section_id == "Now"
+    assert env.store.reminders[rid]["section"] == "Now"
