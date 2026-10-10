@@ -3,13 +3,14 @@
 #
 #   deploy/env.sh staging       runs the repo's live code — edit, then just run it
 #   deploy/env.sh prod [tag]    runs a git worktree checked out at a tag
-#                               (default: the tag of the repo's current VERSION)
+#                               (default: the tag of the repo's current VERSION),
+#                               next to this checkout: <repo>-prod
 #
 # Each environment is self-contained, so iterating on staging can't touch
 # what prod syncs:
 #
 #   ~/Applications/<name>.app                          app bundle (own Reminders permission)
-#   ~/Library/Application Support/Todoist Sync/<env>/  config.env, state, lock, breaker[, app/ worktree]
+#   ~/Library/Application Support/Todoist Sync/<env>/  config.env, state, lock, breaker
 #   ~/Library/Logs/Todoist Sync/<env>.log              log (shows in Console.app)
 #
 # The bundle holds only Info.plist, an icon and a wrapper with fixed paths.
@@ -17,7 +18,8 @@
 # permission to — stays the same across rebuilds: changing code never
 # re-prompts. Prod deploys and rolls back by checking its worktree out at
 # another tag; devenv gives that worktree its own venv (and keeps its
-# interpreter rooted in the Nix store).
+# interpreter rooted in the Nix store). The worktree can't live under
+# Application Support: devenv's Python wrapper breaks on spaces in its path.
 set -euo pipefail
 
 ENV="${1:-}"
@@ -44,7 +46,7 @@ else
         echo "error: no tag $TAG — prod only runs tagged versions (tag the VERSION bump first)" >&2
         exit 1
     fi
-    CODE="$DATA/app"
+    CODE="$(dirname "$REPO")/$(basename "$REPO")-prod"
     if [ -e "$CODE/.git" ]; then
         git -C "$CODE" checkout -q --detach "$TAG"
     else

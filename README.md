@@ -127,7 +127,7 @@ progress can't touch a list you care about:
 | | staging | prod |
 |---|---|---|
 | App | `~/Applications/Todoist Sync (Staging).app` | `~/Applications/Todoist Sync.app` |
-| Code | the repo's live working tree | a git worktree at a tag (`…/prod/app`) |
+| Code | the repo's live working tree | a git worktree at a tag, next to the repo (`<repo>-prod`) |
 | Data (config.env, state, breaker) | `~/Library/Application Support/Todoist Sync/staging/` | `…/prod/` |
 | Log (visible in Console.app) | `~/Library/Logs/Todoist Sync/staging.log` | `…/prod.log` |
 
