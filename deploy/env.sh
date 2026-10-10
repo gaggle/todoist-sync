@@ -1,21 +1,23 @@
 #!/bin/bash
 # Builds (or rebuilds) one environment of Todoist Sync:
 #
-#   deploy/env.sh staging   runs the repo's live code — edit, then just run it
-#   deploy/env.sh prod      runs a frozen snapshot of the committed HEAD
+#   deploy/env.sh staging       runs the repo's live code — edit, then just run it
+#   deploy/env.sh prod [tag]    runs a git worktree checked out at a tag
+#                               (default: the tag of the repo's current VERSION)
 #
 # Each environment is self-contained, so iterating on staging can't touch
 # what prod syncs:
 #
 #   ~/Applications/<name>.app                          app bundle (own Reminders permission)
-#   ~/Library/Application Support/Todoist Sync/<env>/  config.env, state, lock, breaker[, app/]
+#   ~/Library/Application Support/Todoist Sync/<env>/  config.env, state, lock, breaker[, app/ worktree]
 #   ~/Library/Logs/Todoist Sync/<env>.log              log (shows in Console.app)
 #
 # The bundle holds only Info.plist, an icon and a wrapper with fixed paths.
 # Its content — and so its ad-hoc signature, which macOS ties the Reminders
 # permission to — stays the same across rebuilds: changing code never
-# re-prompts. Prod's code sits behind a symlink, app -> build-<sha>, so a
-# rebuild swaps it in one step and the previous build stays for rollback.
+# re-prompts. Prod deploys and rolls back by checking its worktree out at
+# another tag; devenv gives that worktree its own venv (and keeps its
+# interpreter rooted in the Nix store).
 set -euo pipefail
 
 ENV="${1:-}"
@@ -29,46 +31,35 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA="$HOME/Library/Application Support/Todoist Sync/$ENV"
 LOG="$HOME/Library/Logs/Todoist Sync/$ENV.log"
 APP="$HOME/Applications/$NAME.app"
-DEVENV_PYTHON="$REPO/.devenv/state/venv/bin/python"
-
-[ -x "$DEVENV_PYTHON" ] || { echo "error: no devenv venv at $DEVENV_PYTHON — run 'devenv shell' once first" >&2; exit 1; }
 command -v swift >/dev/null || { echo "error: swift not found — xcode-select --install" >&2; exit 1; }
 
 mkdir -p "$DATA" "$(dirname "$LOG")" "$HOME/Applications"
 chmod 700 "$DATA"
 
 if [ "$ENV" = staging ]; then
-    echo "Building the Reminders bridge from the working tree..."
-    (cd "$REPO/swift/reminders-bridge" && swift build -c release)
-    PYTHON="$DEVENV_PYTHON"
-    BRIDGE="$REPO/swift/reminders-bridge/.build/release/reminders-bridge"
+    CODE="$REPO"
 else
-    if [ -n "$(git -C "$REPO" status --porcelain)" ]; then
-        echo "error: uncommitted changes — prod is only built from a clean, committed tree" >&2
+    TAG="${2:-v$(cat "$REPO/VERSION")}"
+    if ! git -C "$REPO" rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+        echo "error: no tag $TAG — prod only runs tagged versions (tag the VERSION bump first)" >&2
         exit 1
     fi
-    SHA="$(git -C "$REPO" rev-parse --short HEAD)"
-    BUILD="$DATA/build-$SHA"
-    echo "Snapshotting $SHA into $BUILD..."
-    rm -rf "$BUILD"
-    mkdir -p "$BUILD/src"
-    git -C "$REPO" archive HEAD | tar -x -C "$BUILD/src"
-    # Stamp the commit into the version (a PEP 440 local segment), so every
-    # prod log line traces back to the exact code that wrote it.
-    echo "$(cat "$BUILD/src/VERSION").g$SHA" > "$BUILD/src/VERSION"
-    "$DEVENV_PYTHON" -m venv "$BUILD/venv"
-    "$BUILD/venv/bin/pip" install -q -r "$BUILD/src/requirements.txt" "$BUILD/src"
-    # The venv's interpreter lives in the Nix store; a GC root keeps it there
-    # even after devenv moves on to a newer Python and the store is collected.
-    BASE_PYTHON="$(cd "$BUILD/venv/bin" && readlink -f python)"
-    STORE_PATH="$(echo "$BASE_PYTHON" | cut -d/ -f1-4)"
-    nix-store --add-root "$BUILD/python.gcroot" -r "$STORE_PATH" >/dev/null
-    (cd "$BUILD/src/swift/reminders-bridge" && swift build -c release)
-    ln -sfn "build-$SHA" "$DATA/app"
-    PYTHON="$DATA/app/venv/bin/python"
-    BRIDGE="$DATA/app/src/swift/reminders-bridge/.build/release/reminders-bridge"
+    CODE="$DATA/app"
+    if [ -e "$CODE/.git" ]; then
+        git -C "$CODE" checkout -q --detach "$TAG"
+    else
+        git -C "$REPO" worktree add -q --detach "$CODE" "$TAG"
+    fi
+    echo "Prod worktree at $TAG ($(git -C "$CODE" rev-parse --short HEAD))"
+    echo "Building its devenv..."
+    (cd "$CODE" && devenv shell -- true)
 fi
-codesign -s - --force "$(cd "$(dirname "$BRIDGE")" && pwd -P)/$(basename "$BRIDGE")" 2>/dev/null
+echo "Building the Reminders bridge..."
+(cd "$CODE/swift/reminders-bridge" && swift build -c release)
+PYTHON="$CODE/.devenv/state/venv/bin/python"
+BRIDGE="$CODE/swift/reminders-bridge/.build/release/reminders-bridge"
+[ -x "$PYTHON" ] || { echo "error: no devenv venv at $PYTHON — run 'devenv shell' in $CODE once" >&2; exit 1; }
+codesign -s - --force "$BRIDGE" 2>/dev/null
 
 if [ ! -f "$DATA/config.env" ]; then
     case "$ENV" in
