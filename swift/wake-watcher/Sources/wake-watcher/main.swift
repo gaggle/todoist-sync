@@ -54,8 +54,8 @@ let reachabilityPollIntervalSeconds = 1.0
 // Plain `kickstart`, never `kickstart -k`: -k kills a sync that's already
 // running, possibly between a Todoist write and the state save. Without
 // it, a kickstart while the timer's run is in flight does nothing.
-@Sendable func runSync(waited: Double) {
-    eprint("wake-watcher: \(Date()) woke; starting \(syncJobLabel) after \(Int(waited))s")
+@Sendable func runSync(trigger: String, waited: Double) {
+    eprint("wake-watcher: \(Date()) \(trigger); starting \(syncJobLabel) after \(Int(waited))s")
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
     task.arguments = ["kickstart", "gui/\(getuid())/\(syncJobLabel)"]
@@ -66,13 +66,13 @@ let reachabilityPollIntervalSeconds = 1.0
     }
 }
 
-func waitForReachabilityThenSync(elapsed: Double = 0) {
+func waitForReachabilityThenSync(trigger: String, elapsed: Double = 0) {
     if canResolve(host: reachabilityTarget) || elapsed >= postWakeMaxWaitSeconds {
-        runSync(waited: elapsed)
+        runSync(trigger: trigger, waited: elapsed)
         return
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + reachabilityPollIntervalSeconds) {
-        waitForReachabilityThenSync(elapsed: elapsed + reachabilityPollIntervalSeconds)
+        waitForReachabilityThenSync(trigger: trigger, elapsed: elapsed + reachabilityPollIntervalSeconds)
     }
 }
 
@@ -81,7 +81,17 @@ NSWorkspace.shared.notificationCenter.addObserver(
     object: nil,
     queue: .main
 ) { _ in
-    waitForReachabilityThenSync()
+    waitForReachabilityThenSync(trigger: "woke")
 }
+
+// SIGUSR1 simulates a wake, down the same path from the reachability wait
+// on, so a Mac that never sleeps can still check that a wake would start a
+// sync: `launchctl kill SIGUSR1 gui/$UID/<this job>` (env-wake-test).
+signal(SIGUSR1, SIG_IGN)
+let simulatedWake = DispatchSource.makeSignalSource(signal: SIGUSR1, queue: .main)
+simulatedWake.setEventHandler {
+    waitForReachabilityThenSync(trigger: "simulated wake (SIGUSR1)")
+}
+simulatedWake.resume()
 
 RunLoop.main.run()

@@ -32,6 +32,31 @@
     open -n -W "$HOME/Applications/$name.app" --args "$@"
   '';
 
+  # Simulates a wake (SIGUSR1 to the wake-watcher, which treats it like the
+  # real thing) and checks that it started a sync. The only way to test the
+  # wake path on a Mac that never sleeps. Needs the env's agents loaded.
+  scripts.env-wake-test.exec = ''
+    env="''${1:?usage: env-wake-test staging|prod}"
+    job="gui/$(id -u)/com.todoist-sync.$env"
+    wakelog="$HOME/Library/Logs/Todoist Sync/$env.launchd.log"
+    launchctl print "$job.wake-watcher" >/dev/null 2>&1 || { echo "error: $env's wake-watcher isn't loaded (staging: env-build staging --agents)" >&2; exit 1; }
+    runs() { launchctl print "$job.sync" | awk '/^\truns = /{print $3}'; }
+    # A kickstart while a sync is running does nothing, so start from idle.
+    while launchctl print "$job.sync" | grep -q "^	state = running"; do sleep 1; done
+    before="$(runs)"; lines="$(wc -l < "$wakelog" 2>/dev/null || echo 0)"
+    launchctl kill SIGUSR1 "$job.wake-watcher"
+    for _ in $(seq 1 45); do
+      if [ "$(runs)" -gt "$before" ] && tail -n +"$((lines + 1))" "$wakelog" | grep -q "simulated wake"; then
+        tail -n +"$((lines + 1))" "$wakelog" | grep "simulated wake"
+        echo "ok: a simulated wake started a $env sync"
+        exit 0
+      fi
+      sleep 1
+    done
+    echo "FAIL: no sync started within 45s of a simulated wake; see $wakelog" >&2
+    exit 1
+  '';
+
   scripts.env-log.exec = ''
     tail -n 40 -F "$HOME/Library/Logs/Todoist Sync/''${1:?usage: env-log staging|prod}.log"
   '';

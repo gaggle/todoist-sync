@@ -180,3 +180,12 @@ asks launchd to run the sync job (`launchctl kickstart`), rather than
 spawning the sync itself, so launchd is the parent of every run and the
 Reminders permission is always attributed to the app. It never passes
 `-k`, so a sync already in flight is left alone.
+
+A `SIGUSR1` makes the wake-watcher act as if the Mac just woke, so the wake
+path can be checked on a Mac that never sleeps:
+
+```bash
+devenv shell -- env-wake-test prod    # staging needs: env-build staging --agents
+```
+
+It sends the signal through launchd and passes once a sync has started.
