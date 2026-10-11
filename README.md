@@ -137,8 +137,19 @@ devenv shell -- env-sync staging      # one sync; add --dry-run to preview
 devenv shell -- env-log staging       # follow the log
 ```
 
-Each app asks for Reminders access once, under its own name. Its bundle
-only holds a wrapper with fixed paths, so rebuilding never re-prompts.
+Prod runs in the background: `env-build prod` (re)loads two LaunchAgents,
+`com.todoist-sync.prod.sync` (every 5 minutes, and at login) and
+`com.todoist-sync.prod.wake-watcher` (a sync soon after each wake). Both
+show up as "Todoist Sync" under System Settings → General → Login Items &
+Extensions. A deploy waits for a running sync to finish rather than
+killing it. Staging only syncs in the background when built with
+`env-build staging --agents`, because the integration tests refuse to run
+alongside it; a plain `env-build staging` removes its agents again.
+
+Each app asks for Reminders access once, under its own name. The bundles
+are signed with an Apple Development identity (auto-detected, or
+`TODOIST_SYNC_SIGN_IDENTITY`), so macOS ties that permission to the app's
+identity rather than its exact bytes, and rebuilding never re-prompts.
 Prod deploys a tagged version — every VERSION bump is tagged — and rolls
 back by deploying an earlier tag. Running the
 sync without an environment (straight from a checkout) is refused.

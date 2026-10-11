@@ -17,8 +17,9 @@
     '';
   };
 
-  # Build an environment app: `env-build staging` (live repo code) or
-  # `env-build prod` (snapshot of the committed HEAD). See deploy/env.sh.
+  # Build an environment app: `env-build staging [--agents]` (live repo code)
+  # or `env-build prod [tag]` (a worktree at a tag, synced in the background).
+  # See deploy/env.sh.
   scripts.env-build.exec = ''
     "$DEVENV_ROOT/deploy/env.sh" "$@"
   '';
@@ -38,6 +39,10 @@
   # End-to-end scenarios against the "Sync Test" list and project, run as the
   # staging app (see integration_tests/conftest.py). Extra args go to pytest.
   scripts.integration-test.exec = ''
+    if launchctl print "gui/$(id -u)/com.todoist-sync.staging.sync" >/dev/null 2>&1; then
+      echo "error: staging is syncing in the background, which would interfere — remove its agents first: env-build staging" >&2
+      exit 1
+    fi
     data="$HOME/Library/Application Support/Todoist Sync/staging"
     out="$(mktemp -d)"
     rm -f "$data/integration-tests.exit"

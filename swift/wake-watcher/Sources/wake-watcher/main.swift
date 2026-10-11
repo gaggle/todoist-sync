@@ -50,10 +50,15 @@ let reachabilityPollIntervalSeconds = 1.0
 // "wake-watcher" instead of the sync tool itself. Going through launchd
 // makes launchd the direct parent either way, so wake-triggered and
 // timer-triggered runs get identical, correct attribution.
-@Sendable func runSync() {
+//
+// Plain `kickstart`, never `kickstart -k`: -k kills a sync that's already
+// running, possibly between a Todoist write and the state save. Without
+// it, a kickstart while the timer's run is in flight does nothing.
+@Sendable func runSync(waited: Double) {
+    eprint("wake-watcher: \(Date()) woke; starting \(syncJobLabel) after \(Int(waited))s")
     let task = Process()
     task.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-    task.arguments = ["start", syncJobLabel]
+    task.arguments = ["kickstart", "gui/\(getuid())/\(syncJobLabel)"]
     do {
         try task.run()
     } catch {
@@ -63,7 +68,7 @@ let reachabilityPollIntervalSeconds = 1.0
 
 func waitForReachabilityThenSync(elapsed: Double = 0) {
     if canResolve(host: reachabilityTarget) || elapsed >= postWakeMaxWaitSeconds {
-        runSync()
+        runSync(waited: elapsed)
         return
     }
     DispatchQueue.main.asyncAfter(deadline: .now() + reachabilityPollIntervalSeconds) {

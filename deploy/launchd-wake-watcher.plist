@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Starts a sync soon after the Mac wakes. Generated into ~/Library/LaunchAgents by deploy/env.sh. -->
 <plist version="1.0">
 <dict>
     <key>Label</key>
@@ -7,17 +8,22 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>__PROJECT_ROOT__/deploy/todoist-sync.app/Contents/MacOS/wake-watcher</string>
+        <string>__APP__/Contents/MacOS/wake-watcher</string>
         <string>__SYNC_LABEL__</string>
     </array>
 
-    <key>WorkingDirectory</key>
-    <string>__PROJECT_ROOT__</string>
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>__BUNDLE_ID__</string>
+    </array>
 
     <key>RunAtLoad</key>
     <true/>
 
     <key>KeepAlive</key>
     <true/>
+
+    <key>StandardErrorPath</key>
+    <string>__LAUNCHD_LOG__</string>
 </dict>
 </plist>

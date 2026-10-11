@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The periodic sync. Generated into ~/Library/LaunchAgents by deploy/env.sh. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>__LABEL__</string>
+
+    <!-- The bundle's own executable, so macOS attributes Reminders access to the app. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__APP__/Contents/MacOS/todoist-sync</string>
+    </array>
+
+    <!-- Shows the job as the app, name and icon, under Login Items & Extensions. -->
+    <key>AssociatedBundleIdentifiers</key>
+    <array>
+        <string>__BUNDLE_ID__</string>
+    </array>
+
+    <!-- Deletes take 4 consecutive confirmations: about 20 minutes at this rate. -->
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!-- The sync logs to its own file; this only catches a crash before logging starts. -->
+    <key>StandardErrorPath</key>
+    <string>__LAUNCHD_LOG__</string>
+</dict>
+</plist>
