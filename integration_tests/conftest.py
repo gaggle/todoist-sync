@@ -86,11 +86,12 @@ def _containers():
     from todoist_sync.reminders_bridge import RemindersBridge
     from todoist_sync.todoist_bridge import TodoistBridge
 
-    if (config.ENVIRONMENT, config.REMINDERS_LIST, config.TODOIST_PROJECT) != ("staging", BENCH, BENCH):
+    config.validate()
+    channels = [(c.reminders, c.todoist) for c in config.CHANNELS]
+    if config.ENVIRONMENT != "staging" or channels != [(BENCH, BENCH)]:
         pytest.exit(
             f"Refusing to run: integration tests empty their containers, so they only run in staging "
-            f"against {BENCH!r} (got env={config.ENVIRONMENT!r}, list={config.REMINDERS_LIST!r}, "
-            f"project={config.TODOIST_PROJECT!r})",
+            f"with the one channel {BENCH!r} ↔ {BENCH!r} (got env={config.ENVIRONMENT!r}, channels={channels!r})",
             returncode=2,
         )
     todoist = TodoistBridge(config.TODOIST_API_KEY)
@@ -106,7 +107,7 @@ def bench(_containers, monkeypatch):
 
     def reset():
         _containers.empty()
-        for path in (config.STATE_PATH, config.BREAKER_PATH):
+        for path in (config.state_path(config.CHANNELS[0]), config.BREAKER_PATH):
             path.unlink(missing_ok=True)
 
     # A tripped breaker would otherwise post a real alert reminder.
@@ -119,6 +120,6 @@ def bench(_containers, monkeypatch):
 @pytest.fixture
 def sync():
     """One real sync of the bench, in-process."""
-    from todoist_sync import sync_tasks
+    from todoist_sync import config, sync_tasks
 
-    return sync_tasks.main
+    return lambda **kwargs: sync_tasks.main(config.CHANNELS[0], **kwargs)

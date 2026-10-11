@@ -14,20 +14,16 @@ import httpx
 
 from . import config, state
 from . import __version__
+from .channels import Channel
 from .config import (
-    ARCHIVE_AFTER_DAYS,
     BREAKER_PATH,
-    CONFLICT_WINNER,
-    CREATE_TODOIST_PROJECT,
+    CHANNELS,
     ENVIRONMENT,
     LOCK_PATH,
     LOG_LEVEL,
     LOG_PATH,
-    PRUNE_MISSING_AFTER_CHECKS,
-    REMINDERS_LIST,
-    STATE_PATH,
     TODOIST_API_KEY,
-    TODOIST_PROJECT,
+    state_path,
 )
 from .dry_run import DryRunReminders, DryRunTodoist, is_placeholder_pair
 from .reminders_bridge import RemindersBridge, create_alert_reminder
@@ -54,7 +50,7 @@ def _configure_logging() -> None:
     )
     handler.setFormatter(formatter)
 
-    effective_level = LOG_LEVEL or logging.INFO
+    effective_level = LOG_LEVEL
     root = logging.getLogger()
     root.setLevel(effective_level)
     root.addHandler(handler)
@@ -144,8 +140,8 @@ def _acquire_lock():
     """Prevents overlapping runs: the 5-minute timer and the wake-watcher
     are separate launchd jobs that can both invoke this script around the
     same time (e.g. the Mac wakes right as the timer also fires). Without
-    this, two processes could read the same state.json, both create a task
-    for the same new reminder, and race to write state.json back — silently
+    this, two processes could read the same state file, both create a task
+    for the same new reminder, and race to write it back — silently
     duplicating items or losing pairs. flock is tied to the open fd, so it's
     released automatically even if the process crashes."""
     lock_file = open(LOCK_PATH, "w")
@@ -196,11 +192,19 @@ def _redact_for_log(field_name: str, value):
 
 
 def _reconcile_scalar(
-    last_value, r_value, t_value, set_todoist, set_reminders, *, field_name="value", pair_label="?"
+    last_value,
+    r_value,
+    t_value,
+    set_todoist,
+    set_reminders,
+    *,
+    field_name="value",
+    pair_label="?",
+    conflict_winner="reminders",
 ):
     """3-way merge for a simple equality-comparable field: propagate
     whichever side changed since last_value, or resolve a genuine conflict
-    (both changed, to different values) per CONFLICT_WINNER. Returns
+    (both changed, to different values) per conflict_winner. Returns
     (new_value, changed)."""
     r_changed = r_value != last_value
     t_changed = t_value != last_value
@@ -209,17 +213,17 @@ def _reconcile_scalar(
         return last_value, False
 
     if r_changed and t_changed and r_value != t_value:
-        winner = r_value if CONFLICT_WINNER == "reminders" else t_value
+        winner = r_value if conflict_winner == "reminders" else t_value
         # Both sides changed to different values: whichever wasn't chosen
         # gets silently overwritten. Worth a WARNING (not just DEBUG) since
         # that's a real edit being discarded, not routine propagation — but
         # the values themselves are personal content (titles/notes), so
         # keep those out of the default-visible line and behind DEBUG.
         log.warning(
-            "Conflict on %s for pair %s: %s wins (SYNC_CONFLICT_WINNER)",
+            "Conflict on %s for pair %s: %s wins (conflict_winner)",
             field_name,
             pair_label,
-            CONFLICT_WINNER,
+            conflict_winner,
         )
         log.debug(
             "Conflict detail for pair %s: reminders=%r, todoist=%r",
@@ -267,34 +271,26 @@ def _skip_save_state(*_args) -> None:
     pass
 
 
-def main(dry_run: bool = False) -> None:
-    log.info(
-        "todoist-sync v%s (%s) starting%s", __version__, ENVIRONMENT, " (dry run: nothing will be written)" if dry_run else ""
-    )
-    config.validate()
-    log.debug(
-        "config: reminders_list=%r todoist_project=%r conflict_winner=%r archive_after_days=%d "
-        "prune_after_checks=%d",
-        REMINDERS_LIST,
-        TODOIST_PROJECT,
-        CONFLICT_WINNER,
-        ARCHIVE_AFTER_DAYS,
-        PRUNE_MISSING_AFTER_CHECKS,
-    )
-    reminders = RemindersBridge(REMINDERS_LIST)
+def main(channel: Channel, dry_run: bool = False) -> None:
+    """Syncs one channel: its Reminders list with its Todoist project."""
+    log.debug("channel: %s", channel)
+    state_file = state_path(channel)
+    reminders = RemindersBridge(channel.reminders, sections=channel.sections)
     todoist = TodoistBridge(TODOIST_API_KEY)
-    project_id = todoist.get_or_create_project(TODOIST_PROJECT, create=CREATE_TODOIST_PROJECT and not dry_run)
+    # The project must already exist: never auto-created, so a typo fails
+    # loudly instead of quietly spawning a stray project next to a shared one.
+    project_id = todoist.get_or_create_project(channel.todoist, create=False)
     # A dry run reads both sides for real but routes every write — to
-    # Reminders, Todoist, and state.json — to a log line instead.
+    # Reminders, Todoist and the state file — to a log line instead.
     save_state = _skip_save_state if dry_run else state.save_state
     if dry_run:
         reminders = DryRunReminders(reminders)
         todoist = DryRunTodoist(todoist)
 
-    pairs, archive = state.load_state(STATE_PATH)
+    pairs, archive = state.load_state(state_file)
     linked_reminder_ids = {p["reminder_id"] for p in pairs}
     linked_task_ids = {p["task_id"] for p in pairs}
-    # Archived pairs (completed on both sides for SYNC_ARCHIVE_AFTER_DAYS)
+    # Archived pairs (completed on both sides for archive_after_days)
     # are excluded from the per-pair reconciliation loop below, but their
     # ids are kept here so a reminder/task that gets reactivated is matched
     # back to its existing pair instead of spawning a duplicate.
@@ -327,7 +323,7 @@ def main(dry_run: bool = False) -> None:
             if not r["completed"]:
                 _unarchive(archived_pair)
                 reactivated += 1
-                save_state(STATE_PATH, pairs, archive)
+                save_state(state_file, pairs, archive)
             continue
         # Only open reminders get copied, mirroring the Todoist side
         # (get_active_tasks() never returns completed tasks). Nothing is
@@ -359,7 +355,7 @@ def main(dry_run: bool = False) -> None:
         # later item in this loop fails (e.g. connectivity drops mid-run),
         # an un-persisted pair here would make this reminder look unlinked
         # again next run and get a duplicate task created for it.
-        save_state(STATE_PATH, pairs, archive)
+        save_state(state_file, pairs, archive)
 
     created_in_reminders = 0
     for t in todoist.get_active_tasks(project_id):
@@ -372,13 +368,13 @@ def main(dry_run: bool = False) -> None:
             # needed, unlike the reminders side above.
             _unarchive(archived_pair)
             reactivated += 1
-            save_state(STATE_PATH, pairs, archive)
+            save_state(state_file, pairs, archive)
             continue
         if t.due is not None and t.due.is_recurring:
             _log_repeat_not_synced("Todoist task", t.content, t.due.string)
         due_dt, all_day = _due_to_datetime(t.due)
         body = t.description or ""
-        section = todoist.section_name(project_id, t.section_id)
+        section = todoist.section_name(project_id, t.section_id) if channel.sections else None
         reminder_id = reminders.create_reminder(t.content, body, due_dt, all_day)
         if section is not None:
             reminders.set_section(reminder_id, section)
@@ -397,18 +393,18 @@ def main(dry_run: bool = False) -> None:
         linked_reminder_ids.add(reminder_id)
         created_in_reminders += 1
         # Same rationale as above: create_reminder() is not idempotent.
-        save_state(STATE_PATH, pairs, archive)
+        save_state(state_file, pairs, archive)
 
     # 2. Reconcile already-linked pairs by id directly. Reminder lookups are
-    #    scoped to REMINDERS_LIST on the Swift side (not just addressed by global
-    #    id) so a tampered or stale state.json entry can't read/mutate a
+    #    scoped to the channel's list on the Swift side (not just addressed by global
+    #    id) so a tampered or stale state file entry can't read/mutate a
     #    reminder outside the intended list. Every field is resolved against
     #    the last-synced value recorded on the pair (not wall-clock "last
     #    modified" timestamps) — otherwise our own writes to one side make
     #    that side look "newer" on the next run and its value keeps winning
     #    even when it's the stale one. Genuine conflicts (both sides changed
     #    to different values since the last sync) resolve per
-    #    CONFLICT_WINNER.
+    #    the channel's conflict_winner.
     completed_synced = 0
     due_synced = 0
     name_synced = 0
@@ -443,9 +439,9 @@ def main(dry_run: bool = False) -> None:
                 "Pair %s: reminder or task missing (check %d/%d)",
                 _pair_label(pair),
                 pair["missing_checks"],
-                PRUNE_MISSING_AFTER_CHECKS,
+                channel.prune_after_checks,
             )
-            if pair["missing_checks"] >= PRUNE_MISSING_AFTER_CHECKS:
+            if pair["missing_checks"] >= channel.prune_after_checks:
                 # The side still holding the item, if any, is where the
                 # removal gets mirrored.
                 survivor = "reminder" if r is not None else "task" if t is not None else None
@@ -475,11 +471,12 @@ def main(dry_run: bool = False) -> None:
                 ),
                 field_name="completed",
                 pair_label=_pair_label(pair),
+                conflict_winner=channel.conflict_winner,
             )
             pair["completed"] = new_completed
             if completed_changed:
                 completed_synced += 1
-            # completed_at anchors the SYNC_ARCHIVE_AFTER_DAYS grace period.
+            # completed_at anchors the archive_after_days grace period.
             # Stamp it on every fresh transition to completed, and backfill
             # it for pairs that were already completed before this field
             # existed, so they don't sit un-archived forever.
@@ -497,6 +494,7 @@ def main(dry_run: bool = False) -> None:
             set_reminders=lambda v: reminders.set_name(r["id"], v),
             field_name="name",
             pair_label=_pair_label(pair),
+            conflict_winner=channel.conflict_winner,
         )
         pair["name"] = new_name
         if name_changed:
@@ -510,28 +508,33 @@ def main(dry_run: bool = False) -> None:
             set_reminders=lambda v: reminders.set_body(r["id"], v),
             field_name="body",
             pair_label=_pair_label(pair),
+            conflict_winner=channel.conflict_winner,
         )
         pair["body"] = new_body
         if body_changed:
             notes_synced += 1
 
-        # Sections match by name: a Todoist board column and a Reminders list
-        # section of the same name are the same column, created on whichever
-        # side lacks it. A pair from before sections were synced has no
-        # baseline; taking the reminder's as one lets Todoist's columns,
-        # where they've been in use, flow over.
-        new_section, section_changed = _reconcile_scalar(
-            pair.get("section", r["section"]),
-            r["section"],
-            todoist.section_name(project_id, t.section_id),
-            set_todoist=lambda v: todoist.move_to_section(t.id, project_id, v),
-            set_reminders=lambda v: reminders.set_section(r["id"], v),
-            field_name="section",
-            pair_label=_pair_label(pair),
-        )
-        pair["section"] = new_section
-        if section_changed:
-            sections_synced += 1
+        # A channel with sections off (a Groceries list) leaves columns alone
+        # on both sides.
+        if channel.sections:
+            # Sections match by name: a Todoist board column and a Reminders list
+            # section of the same name are the same column, created on whichever
+            # side lacks it. A pair from before sections were synced has no
+            # baseline; taking the reminder's as one lets Todoist's columns,
+            # where they've been in use, flow over.
+            new_section, section_changed = _reconcile_scalar(
+                pair.get("section", r["section"]),
+                r["section"],
+                todoist.section_name(project_id, t.section_id),
+                set_todoist=lambda v: todoist.move_to_section(t.id, project_id, v),
+                set_reminders=lambda v: reminders.set_section(r["id"], v),
+                field_name="section",
+                pair_label=_pair_label(pair),
+                conflict_winner=channel.conflict_winner,
+            )
+            pair["section"] = new_section
+            if section_changed:
+                sections_synced += 1
 
         last_due = _deserialize_due(pair.get("due"))
         last_all_day = pair.get("all_day", False)
@@ -543,16 +546,16 @@ def main(dry_run: bool = False) -> None:
 
         if r_changed and t_changed and not _due_equal(r_due, r_all_day, t_due, t_all_day):
             # Both sides changed to different values since the last sync —
-            # genuine conflict, resolved per CONFLICT_WINNER.
+            # genuine conflict, resolved per the channel's conflict_winner.
             log.warning(
-                "Conflict on due date for pair %s: %s wins (SYNC_CONFLICT_WINNER)",
+                "Conflict on due date for pair %s: %s wins (conflict_winner)",
                 _pair_label(pair),
-                CONFLICT_WINNER,
+                channel.conflict_winner,
             )
             log.debug(
                 "Conflict detail for pair %s: reminders=%r, todoist=%r", _pair_label(pair), r_due, t_due
             )
-            if CONFLICT_WINNER == "todoist":
+            if channel.conflict_winner == "todoist":
                 winning_due, winning_all_day = t_due, t_all_day
                 if t_due is not None:
                     reminders.set_due_date(r["id"], t_due, t_all_day)
@@ -582,7 +585,7 @@ def main(dry_run: bool = False) -> None:
             not is_recurring
             and pair.get("completed")
             and pair.get("completed_at")
-            and now - datetime.fromisoformat(pair["completed_at"]) >= timedelta(days=ARCHIVE_AFTER_DAYS)
+            and now - datetime.fromisoformat(pair["completed_at"]) >= timedelta(days=channel.archive_after_days)
         ):
             to_archive.append(pair)
 
@@ -592,12 +595,12 @@ def main(dry_run: bool = False) -> None:
     #    kept only so a later reactivation (see step 1) is recognized
     #    instead of spawning a duplicate.
     for pair in to_archive:
-        log.debug("Pair %s: archived (completed on both sides past SYNC_ARCHIVE_AFTER_DAYS)", _pair_label(pair))
+        log.debug("Pair %s: archived (completed on both sides past archive_after_days)", _pair_label(pair))
         pairs.remove(pair)
         archive.append(pair)
 
     # 4. Mirror confirmed removals, then drop those pairs. An item gone from
-    #    one side for PRUNE_MISSING_AFTER_CHECKS runs — deleted, or moved to
+    #    one side for prune_after_checks runs — deleted, or moved to
     #    another list/project — is deleted from the other side too, so the
     #    two containers stay mirrors; a pair gone from both sides just drops.
     #    Pairs are removed outright, not archived: nothing is left to
@@ -641,7 +644,7 @@ def main(dry_run: bool = False) -> None:
         )
         pairs.remove(pair)
 
-    save_state(STATE_PATH, pairs, archive)
+    save_state(state_file, pairs, archive)
 
     if not any(
         (
@@ -657,14 +660,15 @@ def main(dry_run: bool = False) -> None:
             to_prune,
         )
     ):
-        log.info("%sSync complete: no changes", "DRY RUN: " if dry_run else "")
+        log.info("%sSync complete (%s): no changes", "DRY RUN: " if dry_run else "", channel.label)
     else:
         log.info(
-            "%sSync complete: %d reminder(s) -> Todoist, %d task(s) -> Reminders, "
+            "%sSync complete (%s): %d reminder(s) -> Todoist, %d task(s) -> Reminders, "
             "%d completion(s) synced, %d due date(s) synced, %d title(s) synced, "
             "%d note(s) synced, %d column(s) synced, %d reactivated from archive, %d archived, "
             "%d removal(s) mirrored, %d pruned",
             "DRY RUN: " if dry_run else "",
+            channel.label,
             created_in_todoist,
             created_in_reminders,
             completed_synced,
@@ -719,18 +723,18 @@ def run(argv: list[str] | None = None) -> int:
         log.info("Another sync is already running — skipping this run")
         return 0
     try:
-        for delay in (*_RETRY_DELAYS, None):
-            try:
-                main(dry_run=args.dry_run)
-                return 0
-            except Exception as e:
-                if not _is_transient(e):
-                    raise
-                if delay is None:
-                    log.warning("Sync failed: %s, still after %d retries — leaving it to the next run", _describe(e), len(_RETRY_DELAYS))
-                    return 1
-                log.warning("Sync failed: %s — retrying in %ds", _describe(e), delay)
-                _sleep(delay)
+        log.info(
+            "todoist-sync v%s (%s) starting%s",
+            __version__,
+            ENVIRONMENT,
+            " (dry run: nothing will be written)" if args.dry_run else "",
+        )
+        config.validate()
+        # Channels sync one after another. A channel that keeps failing
+        # transiently is left to the next run while the others carry on;
+        # anything else stops the whole run and trips the one breaker.
+        settled = [_sync_channel(channel, args.dry_run) for channel in CHANNELS]
+        return 0 if all(settled) else 1
     except Exception as e:
         log.exception("Sync failed unexpectedly")
         if not args.dry_run:
@@ -738,6 +742,29 @@ def run(argv: list[str] | None = None) -> int:
         raise
     finally:
         lock_file.close()
+
+
+def _sync_channel(channel: Channel, dry_run: bool) -> bool:
+    """main() for one channel, retrying transient errors. False if it still
+    failed after the retries; anything non-transient propagates."""
+    for delay in (*_RETRY_DELAYS, None):
+        try:
+            main(channel, dry_run=dry_run)
+            return True
+        except Exception as e:
+            if not _is_transient(e):
+                raise
+            if delay is None:
+                log.warning(
+                    "Sync of %s failed: %s, still after %d retries — leaving it to the next run",
+                    channel.label,
+                    _describe(e),
+                    len(_RETRY_DELAYS),
+                )
+                return False
+            log.warning("Sync of %s failed: %s — retrying in %ds", channel.label, _describe(e), delay)
+            _sleep(delay)
+    raise AssertionError("unreachable")
 
 
 if __name__ == "__main__":

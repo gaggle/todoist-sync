@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def load_state(path: Path) -> tuple[list[dict], list[dict]]:
-    """Returns (pairs, archive). A state.json predating the archive split is
+    """Returns (pairs, archive). A state file predating the archive split is
     a bare list of pairs — read as all-active with an empty archive."""
     if not path.exists():
         return [], []
@@ -20,7 +20,7 @@ def load_state(path: Path) -> tuple[list[dict], list[dict]]:
 def save_state(path: Path, pairs: list[dict], archive: list[dict]) -> None:
     # Write to a temp file in the same directory, then atomically swap it
     # into place. A plain write_text() can leave a truncated/invalid
-    # state.json behind if the process is killed mid-write — os.replace()
+    # state file behind if the process is killed mid-write — os.replace()
     # can't produce a partial result, so readers only ever see the old
     # complete file or the new complete file, never something in between.
     fd, tmp_path = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")

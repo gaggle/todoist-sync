@@ -50,12 +50,12 @@ class TodoistBridge:
         return tasks
 
     def get_task(self, task_id: str, project_id: str):
-        # Scoped to project_id so a tampered or stale state.json entry
+        # Scoped to project_id so a tampered or stale state file entry
         # can't read/mutate a task outside the intended project — mirrors
         # the same confinement RemindersBridge applies via list_name.
         # task_id is percent-encoded with nothing left safe, so it can only
         # ever be a single path segment. Interpolated raw, a tampered or
-        # stale state.json entry like "../../../sync" resolves to a
+        # stale state file entry like "../../../sync" resolves to a
         # different endpoint on the same host — with our bearer token
         # attached. (httpx doesn't follow redirects by default, so the
         # token can't reach another host either way.)

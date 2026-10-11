@@ -8,18 +8,19 @@ turned out to clutter every synced item's notes field.
 
 ## How it works
 
-- Both sides get a dedicated container named **Siri Sync** by default (a
-  Reminders list and a Todoist project), created automatically on first
-  run. Only items in these containers are ever touched. The name is set by
-  `SYNC_LIST_NAME` in `config.env` — change it there if you want something
-  else; the rest of this doc just uses the default.
-- Pairings are tracked in a local state file (`state.json` in the environment's data folder), mapping
+- An environment syncs one or more **channels**, each a Reminders list kept
+  in sync with a Todoist project, listed in its `config.toml` (see
+  `config.example.toml`). Only items in those containers are ever touched.
+  Each channel can override the settings below; a Groceries list, for
+  instance, turns `sections` off.
+- Each channel's pairings are tracked in its own state file
+  (`state/<list>.json` in the environment's data folder), mapping
   each reminder's native id directly to its Todoist task id. Nothing is
   written into notes/descriptions to identify a pairing — those fields stay
   exactly as you typed them.
 - On each run the script:
-  1. Creates a linked Todoist task for any reminder in Siri Sync that isn't
-     paired yet (and vice versa), copying over the title, notes/description,
+  1. Creates a linked Todoist task for any open reminder in the list that
+     isn't paired yet (and vice versa), copying over the title, notes/description,
      due date, and completion status.
   2. For every already-linked pair, reconciles title, notes, completion
      status, and due date in both directions — comparing each side's
@@ -27,19 +28,20 @@ turned out to clutter every synced item's notes field.
      not against volatile "last modified" timestamps, so the script's own
      writes can't make a stale value look "newer" and win on the next run.
      If both sides changed a field to different values between two syncs,
-     `SYNC_CONFLICT_WINNER` in `config.env` (`reminders` by default, or
-     `todoist`) decides which one sticks.
+     `conflict_winner` (`reminders` by default, or `todoist`) decides
+     which one sticks. With `sections` on (the default), board columns and
+     list sections are reconciled the same way, matched by name.
   3. Moves any pair that's been completed on both sides for longer than
-     `SYNC_ARCHIVE_AFTER_DAYS` (180 by default) into an archive section of
-     `state.json`. Archived pairs are no longer polled every run — that's
+     `archive_after_days` (180 by default) into an archive section of the
+     channel's state file. Archived pairs are no longer polled every run — that's
      what keeps sync fast as your history of completed tasks grows — but
      their ids are still remembered, so uncompleting one later resumes
      syncing it instead of creating a duplicate.
   4. Mirrors removals: once a reminder or task has been gone from its
-     container for `SYNC_PRUNE_MISSING_AFTER_CHECKS` consecutive runs (4 by
+     container for `prune_after_checks` consecutive runs (4 by
      default — about 20 minutes at prod's 5-minute sync interval), whether
      deleted or moved to another list/project, its counterpart is deleted
-     from the other side and the pair is dropped from `state.json`. If more
+     from the other side and the pair is dropped from the state file. If more
      than 3 *open* items vanish from one side in the same run, nothing is
      deleted — that looks like a glitch (e.g. a full iCloud resync changing
      reminder ids) rather than tidying up — and the run fails, tripping the
@@ -128,7 +130,7 @@ progress can't touch a list you care about:
 |---|---|---|
 | App | `~/Applications/Todoist Sync (Staging).app` | `~/Applications/Todoist Sync.app` |
 | Code | the repo's live working tree | a git worktree at a tag, next to the repo (`<repo>-prod`) |
-| Data (config.env, state, breaker) | `~/Library/Application Support/Todoist Sync/staging/` | `…/prod/` |
+| Data (config.toml, state/, breaker) | `~/Library/Application Support/Todoist Sync/staging/` | `…/prod/` |
 | Log (visible in Console.app) | `~/Library/Logs/Todoist Sync/staging.log` | `…/prod.log` |
 
 ```bash
@@ -158,8 +160,8 @@ sync without an environment (straight from a checkout) is refused.
 
 Each environment logs to its own rotating file (1 MB cap, 3 backups) in
 `~/Library/Logs/Todoist Sync/`, which Console.app lists under Log Reports.
-At `SYNC_LOG_LEVEL=INFO` (prod) a run logs a "starting" line and a one-line
-summary; `DEBUG` (staging) adds every Reminders and Todoist call and the
+At `log_level = "INFO"` (prod) a run logs a "starting" line and a one-line
+summary per channel; `DEBUG` (staging) adds every Reminders and Todoist call and the
 reasoning behind each decision. Each line carries its level, so
 `grep ERROR prod.log` pulls out just the failures. A run started from a
 terminal also mirrors the log to the console.

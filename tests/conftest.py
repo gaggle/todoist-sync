@@ -8,6 +8,7 @@ import pytest
 
 from todoist_sync import state as state_module
 from todoist_sync import sync_tasks
+from todoist_sync.channels import Channel
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -79,12 +80,14 @@ def _reject_dry_run_placeholder(item_id):
 
 
 class FakeRemindersBridge:
-    def __init__(self, list_name):
+    def __init__(self, list_name, sections=True):
         self.list_name = list_name
+        self.sections = sections
         STORE.opened_list = list_name
 
     def get_reminders(self):
-        return [dict(r) for r in STORE.reminders.values()]
+        # Like the real bridge: without sections, it doesn't look them up.
+        return [{**r, "section": r["section"] if self.sections else None} for r in STORE.reminders.values()]
 
     def create_reminder(self, name, body, due_dt=None, all_day=False):
         return STORE.add_reminder(name=name, body=body, due=due_dt, all_day=all_day)
@@ -179,21 +182,18 @@ def env(tmp_path, monkeypatch):
     state_path = tmp_path / "state.json"
     monkeypatch.setattr(sync_tasks, "RemindersBridge", FakeRemindersBridge)
     monkeypatch.setattr(sync_tasks, "TodoistBridge", FakeTodoistBridge)
-    monkeypatch.setattr(sync_tasks, "STATE_PATH", state_path)
-    monkeypatch.setattr(sync_tasks, "REMINDERS_LIST", "Test List")
-    monkeypatch.setattr(sync_tasks, "TODOIST_PROJECT", "Test List")
-    monkeypatch.setattr(sync_tasks, "CREATE_TODOIST_PROJECT", True)
+    monkeypatch.setattr(sync_tasks, "state_path", lambda channel: state_path)
     monkeypatch.setattr(sync_tasks, "TODOIST_API_KEY", "fake-token")
-    monkeypatch.setattr(sync_tasks, "CONFLICT_WINNER", "reminders")
-    monkeypatch.setattr(sync_tasks, "ARCHIVE_AFTER_DAYS", 180)
-    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 4)
-    monkeypatch.setattr(sync_tasks.config, "validate", lambda: None)
 
     class Env:
         store = STORE
 
+        def __init__(self):
+            # Settings a test changes apply from its next env.run().
+            self.channel = Channel(reminders="Test List", todoist="Test List")
+
         def run(self, dry_run=False):
-            sync_tasks.main(dry_run=dry_run)
+            sync_tasks.main(self.channel, dry_run=dry_run)
 
         def load_state(self):
             return state_module.load_state(state_path)

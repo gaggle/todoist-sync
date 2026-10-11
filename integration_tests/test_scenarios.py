@@ -35,7 +35,7 @@ def test_a_second_sync_changes_nothing(bench, sync, caplog):
     with caplog.at_level("INFO"):
         sync()
 
-    assert "Sync complete: no changes" in caplog.text
+    assert "Sync complete (Sync Test ↔ Sync Test): no changes" in caplog.text
 
 
 def test_completing_a_reminder_completes_its_task(bench, sync):
@@ -60,9 +60,9 @@ def test_completing_a_task_completes_its_reminder(bench, sync):
 
 
 def test_deleting_a_reminder_deletes_its_task_once_confirmed(bench, sync, monkeypatch):
-    from todoist_sync import sync_tasks
+    from todoist_sync import config, sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 2)
+    monkeypatch.setattr(config.CHANNELS[0], "prune_after_checks", 2)
     reminder_id = bench.reminders.create_reminder("Short-lived", "", None)
     sync()
     task_id = bench.tasks()["Short-lived"].id
@@ -78,7 +78,7 @@ def test_deleting_a_reminder_deletes_its_task_once_confirmed(bench, sync, monkey
 def test_many_open_items_vanishing_at_once_trips_the_breaker_and_deletes_nothing(bench, sync, monkeypatch):
     from todoist_sync import config, sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 1)
+    monkeypatch.setattr(config.CHANNELS[0], "prune_after_checks", 1)
     titles = [f"Mass {i}" for i in range(sync_tasks._MAX_OPEN_DELETES_PER_RUN + 1)]
     ids = [bench.reminders.create_reminder(title, "", None) for title in titles]
     sync()

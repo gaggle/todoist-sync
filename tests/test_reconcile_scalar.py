@@ -44,24 +44,22 @@ def test_both_changed_to_same_value_needs_no_push():
     assert calls == {"todoist": [], "reminders": []}
 
 
-def test_genuine_conflict_reminders_wins(monkeypatch):
-    monkeypatch.setattr(sync_tasks, "CONFLICT_WINNER", "reminders")
+def test_genuine_conflict_reminders_wins():
     calls, set_todoist, set_reminders = _recording_setters()
 
     value, changed = sync_tasks._reconcile_scalar(
-        "old", "from-reminders", "from-todoist", set_todoist, set_reminders
+        "old", "from-reminders", "from-todoist", set_todoist, set_reminders, conflict_winner="reminders"
     )
 
     assert (value, changed) == ("from-reminders", True)
     assert calls == {"todoist": ["from-reminders"], "reminders": []}
 
 
-def test_genuine_conflict_todoist_wins(monkeypatch):
-    monkeypatch.setattr(sync_tasks, "CONFLICT_WINNER", "todoist")
+def test_genuine_conflict_todoist_wins():
     calls, set_todoist, set_reminders = _recording_setters()
 
     value, changed = sync_tasks._reconcile_scalar(
-        "old", "from-reminders", "from-todoist", set_todoist, set_reminders
+        "old", "from-reminders", "from-todoist", set_todoist, set_reminders, conflict_winner="todoist"
     )
 
     assert (value, changed) == ("from-todoist", True)

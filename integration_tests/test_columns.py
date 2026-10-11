@@ -51,7 +51,7 @@ def test_columns_settle_after_moves(bench, sync, caplog):
     with caplog.at_level("INFO"):
         sync()
 
-    assert "Sync complete: no changes" in caplog.text
+    assert "Sync complete (Sync Test ↔ Sync Test): no changes" in caplog.text
 
 
 def test_a_reminder_taken_out_of_a_section_can_go_back_in(bench, sync):

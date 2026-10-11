@@ -1,0 +1,53 @@
+# Todoist Sync settings: config.toml in the environment's data folder,
+# ~/Library/Application Support/Todoist Sync/<env>/. Unknown or misspelt
+# settings stop the sync (and trip the breaker) rather than being ignored.
+#
+# The Todoist API token isn't here: it lives in the macOS Keychain. Store it
+# with (the trailing -w with no value makes `security` prompt for it, rather
+# than take it on the command line where other processes could see it):
+#   security add-generic-password -s todoist-sync -a default -U -w
+
+# Log verbosity: DEBUG, INFO, WARNING or ERROR. INFO is a "starting" line
+# plus a one-line summary per channel. DEBUG adds every Reminders and
+# Todoist call (with timings), conflict resolutions and individual
+# archive/prune actions: for troubleshooting, not to leave on.
+log_level = "INFO"
+
+# These four are every channel's defaults; a channel can override any of
+# them. Shown with their built-in defaults.
+
+# Sync Todoist board columns with Reminders list sections, matched by name.
+sections = true
+
+# Which side wins when a completion, due date, title, notes or column
+# changed differently on both sides between two syncs: "reminders" or
+# "todoist".
+conflict_winner = "reminders"
+
+# A pair completed on both sides for this many days is archived: no longer
+# polled every run, but still recognised by id if it's reopened.
+archive_after_days = 180
+
+# An item confirmed gone from one side (deleted, or moved out of the list
+# or project) for this many consecutive runs is deleted on the other side
+# too. A count, not a time: it demands that many independent confirmations
+# however far apart the runs are. At prod's 5-minute interval, 4 is about
+# 20 minutes.
+prune_after_checks = 4
+
+# One channel per Reminders list kept in sync with a Todoist project. The
+# project must already exist. Each channel's pairings are kept in
+# state/<list name>.json, so renaming a list here means renaming that file
+# too, or every item would be seen as new and duplicated.
+[[channel]]
+reminders = "Chores"
+todoist = "Family Project"
+
+[[channel]]
+reminders = "Shopping"
+todoist = "Shopping"
+# A Groceries list: Reminders sorts it into aisles of its own, so don't
+# sync columns. This also skips a ReminderKit lookup per reminder, which a
+# long list of ticked-off groceries makes slow.
+sections = false
+archive_after_days = 7

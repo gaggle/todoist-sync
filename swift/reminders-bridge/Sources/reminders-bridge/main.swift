@@ -200,7 +200,7 @@ struct ParsedArgs {
     private let values: [String: String]
     private let flags: Set<String>
 
-    static let flagNames: Set<String> = ["all-day"]
+    static let flagNames: Set<String> = ["all-day", "no-sections"]
 
     init(_ args: [String]) {
         var values: [String: String] = [:]
@@ -249,14 +249,21 @@ case "get-reminders":
         print("[]")
         break
     }
+    let started = Date()
     let reminders = fetchReminders(in: cal)
+    let fetched = Date()
     // Sections come from ReminderKit, one lookup per reminder — skipped
-    // outright for a list that has none.
-    let sections = ListSections(calendar: cal)
-    let hasSections = !sections.all().isEmpty
-    printJSON(reminders.map {
-        toJSON($0, section: hasSections ? sections.sectionName(ofReminder: $0.calendarItemIdentifier) : nil)
-    })
+    // outright for a list that has none, or when the caller doesn't sync them.
+    let sections: ListSections? = opts.flag("no-sections") ? nil : ListSections(calendar: cal)
+    let hasSections = sections.map { !$0.all().isEmpty } ?? false
+    let rows = reminders.map {
+        toJSON($0, section: hasSections ? sections?.sectionName(ofReminder: $0.calendarItemIdentifier) : nil)
+    }
+    // Timing goes to stderr, which the Python side logs at DEBUG.
+    eprint(String(format: "get-reminders: %d reminders (%d open) fetched in %.1fs, sections %@ in %.1fs",
+                  reminders.count, reminders.filter { !$0.isCompleted }.count, fetched.timeIntervalSince(started),
+                  sections == nil ? "skipped" : hasSections ? "looked up" : "none", Date().timeIntervalSince(fetched)))
+    printJSON(rows)
 
 case "create-reminder":
     guard let listName = opts.opt("list"), let cal = findCalendar(named: listName, createIfMissing: true) else {

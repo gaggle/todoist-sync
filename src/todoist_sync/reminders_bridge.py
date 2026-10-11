@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -45,6 +46,7 @@ def _run(*args: str) -> str:
             f"{_BINARY} not found — build it first: "
             f"(cd swift/reminders-bridge && swift build -c release)"
         )
+    started = time.monotonic()
     try:
         result = subprocess.run(
             [str(_BINARY), *args], capture_output=True, text=True, check=True
@@ -60,6 +62,8 @@ def _run(*args: str) -> str:
         # stderr and would otherwise never reach the log.
         log.error("reminders-bridge command failed: %s", (e.stderr or "").strip())
         raise
+    log.debug("reminders-bridge: %s done in %.1fs%s", args[0], time.monotonic() - started,
+              f" ({result.stderr.strip()})" if result.stderr.strip() else "")
     return result.stdout.strip()
 
 
@@ -96,13 +100,17 @@ class RemindersBridge:
     repeated testing (see swift/reminders-bridge and git history).
     """
 
-    def __init__(self, list_name: str):
+    def __init__(self, list_name: str, sections: bool = True):
         self.list_name = list_name
+        # Without sections, every reminder's "section" is None and the
+        # bridge skips ReminderKit entirely: one lookup per reminder,
+        # completed ones included, is what made a Groceries list slow.
+        self._get = ["get-reminders", "--list", list_name] + ([] if sections else ["--no-sections"])
         # Touch the list once so it's created if missing.
-        _run("get-reminders", "--list", list_name)
+        _run("get-reminders", "--list", list_name, "--no-sections")
 
     def get_reminders(self) -> list[dict]:
-        rows = json.loads(_run("get-reminders", "--list", self.list_name))
+        rows = json.loads(_run(*self._get))
         return [_row_to_reminder(row) for row in rows]
 
     def create_reminder(self, name: str, body: str, due_dt: datetime | None = None, all_day: bool = False) -> str:

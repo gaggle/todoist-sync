@@ -4,28 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from todoist_sync.config import resolve_container_names
 from todoist_sync.todoist_bridge import TodoistBridge, TodoistProjectNotFoundError
-
-
-def test_list_name_names_both_sides_and_allows_creating_the_project():
-    assert resolve_container_names({"SYNC_LIST_NAME": "Errands"}) == ("Errands", "Errands", True)
-
-
-def test_defaults_to_siri_sync_when_nothing_is_set():
-    assert resolve_container_names({}) == ("Siri Sync", "Siri Sync", True)
-
-
-def test_separate_names_pair_differently_named_containers():
-    environ = {"SYNC_REMINDERS_LIST": "Chores", "SYNC_TODOIST_PROJECT": "Family Project"}
-
-    assert resolve_container_names(environ) == ("Chores", "Family Project", False)
-
-
-def test_overriding_only_the_reminders_list_keeps_list_name_for_the_project():
-    environ = {"SYNC_LIST_NAME": "Errands", "SYNC_REMINDERS_LIST": "Chores"}
-
-    assert resolve_container_names(environ) == ("Chores", "Errands", True)
 
 
 class _FakeProjectsApi:

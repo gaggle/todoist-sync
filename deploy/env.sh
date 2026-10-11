@@ -15,7 +15,7 @@
 # what prod syncs:
 #
 #   ~/Applications/<name>.app                          app bundle (own Reminders permission)
-#   ~/Library/Application Support/Todoist Sync/<env>/  config.env, state, lock, breaker
+#   ~/Library/Application Support/Todoist Sync/<env>/  config.toml, state/, lock, breaker
 #   ~/Library/Logs/Todoist Sync/<env>.log              log (shows in Console.app)
 #   ~/Library/Logs/Todoist Sync/<env>.launchd.log      the agents' stderr: wakes, early crashes
 #   ~/Library/LaunchAgents/com.todoist-sync.<env>.{sync,wake-watcher}.plist
@@ -99,17 +99,24 @@ BRIDGE="$CODE/swift/reminders-bridge/.build/release/reminders-bridge"
 [ -x "$PYTHON" ] || { echo "error: no devenv venv at $PYTHON — run 'devenv shell' in $CODE once" >&2; exit 1; }
 codesign -s - --force "$BRIDGE" 2>/dev/null
 
-if [ ! -f "$DATA/config.env" ]; then
+# A 2.x environment's config.env and state.json become config.toml and
+# state/<channel>.json, once. The agents are stopped, so nothing's mid-sync.
+"$PYTHON" -m todoist_sync.migrate "$DATA"
+if [ ! -f "$DATA/config.toml" ]; then
     case "$ENV" in
-        staging) PAIR=('SYNC_REMINDERS_LIST="Sync Test"' 'SYNC_TODOIST_PROJECT="Sync Test"' 'SYNC_LOG_LEVEL="DEBUG"') ;;
-        prod)    PAIR=('SYNC_REMINDERS_LIST="Chores"' 'SYNC_TODOIST_PROJECT="Family Project"' 'SYNC_LOG_LEVEL="INFO"') ;;
+        staging) LEVEL=DEBUG; LIST="Sync Test"; PROJECT="Sync Test" ;;
+        prod)    LEVEL=INFO;  LIST="Chores";    PROJECT="Family Project" ;;
     esac
-    {
-        echo "# Todoist Sync — $ENV. Other settings and their defaults: config.env.example in the repo."
-        printf '%s\n' "${PAIR[@]}"
-    } > "$DATA/config.env"
-    chmod 600 "$DATA/config.env"
-    echo "Wrote $DATA/config.env"
+    cat > "$DATA/config.toml" <<EOF
+# Todoist Sync — $ENV. Settings and their defaults: config.example.toml in the repo.
+log_level = "$LEVEL"
+
+[[channel]]
+reminders = "$LIST"
+todoist = "$PROJECT"
+EOF
+    chmod 600 "$DATA/config.toml"
+    echo "Wrote $DATA/config.toml"
 fi
 
 echo "Assembling $APP..."

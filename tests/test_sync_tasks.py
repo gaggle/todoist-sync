@@ -76,7 +76,7 @@ def test_new_reminder_and_new_task_in_same_run_do_not_cross_link(env):
 def test_pair_missing_on_both_sides_increments_missing_checks(env, monkeypatch):
     import todoist_sync.sync_tasks as sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 4)
+    env.channel.prune_after_checks = 4
     env.write_state([{"reminder_id": "gone-r", "task_id": "gone-t", "name": "Ghost", "body": ""}])
 
     env.run()
@@ -118,7 +118,7 @@ def test_completing_reminder_pushes_completion_to_todoist_same_run(env):
 def test_completed_both_sides_stays_active_before_grace_period(env, monkeypatch):
     import todoist_sync.sync_tasks as sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "ARCHIVE_AFTER_DAYS", 180)
+    env.channel.archive_after_days = 180
     rid = env.store.add_reminder(name="Done", completed=True)
     tid = env.store.add_task(content="Done", completed=True)
     recent = (datetime.now() - timedelta(days=5)).isoformat()
@@ -136,7 +136,7 @@ def test_completed_both_sides_stays_active_before_grace_period(env, monkeypatch)
 def test_completed_both_sides_archives_after_grace_period(env, monkeypatch):
     import todoist_sync.sync_tasks as sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "ARCHIVE_AFTER_DAYS", 5)
+    env.channel.archive_after_days = 5
     rid = env.store.add_reminder(name="Done", completed=True)
     tid = env.store.add_task(content="Done", completed=True)
     old = (datetime.now() - timedelta(days=10)).isoformat()
@@ -155,7 +155,7 @@ def test_completed_both_sides_archives_after_grace_period(env, monkeypatch):
 def test_recurring_task_completion_never_reconciled_or_archived(env, monkeypatch):
     import todoist_sync.sync_tasks as sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "ARCHIVE_AFTER_DAYS", 1)
+    env.channel.archive_after_days = 1
     rid = env.store.add_reminder(name="Weekly", completed=True)
     tid = env.store.add_task(content="Weekly", completed=False)
     env.store.tasks[tid].due = FakeDue(datetime(2026, 1, 8), is_recurring=True)
@@ -223,7 +223,7 @@ def test_reactivation_via_task_reappearing_active(env):
 def test_missing_pair_increments_missing_checks_without_pruning(env, monkeypatch):
     import todoist_sync.sync_tasks as sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 4)
+    env.channel.prune_after_checks = 4
     tid = env.store.add_task(id="t1", content="Orphan", completed=False)
     env.write_state([{"reminder_id": "gone", "task_id": tid, "name": "Orphan", "body": ""}])
 
@@ -237,7 +237,7 @@ def test_missing_pair_increments_missing_checks_without_pruning(env, monkeypatch
 def test_missing_pair_pruned_after_threshold(env, monkeypatch):
     import todoist_sync.sync_tasks as sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 2)
+    env.channel.prune_after_checks = 2
     tid = env.store.add_task(id="t1", content="Orphan", completed=False)
     env.write_state([{"reminder_id": "gone", "task_id": tid, "name": "Orphan", "body": "", "missing_checks": 1}])
 
@@ -314,7 +314,7 @@ def test_due_date_conflict_reminders_wins_by_default(env):
 def test_due_date_conflict_todoist_wins_when_configured(env, monkeypatch):
     import todoist_sync.sync_tasks as sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "CONFLICT_WINNER", "todoist")
+    env.channel.conflict_winner = "todoist"
     rid, tid = _seeded_pair(env)
     env.store.reminders[rid]["due"] = datetime(2026, 1, 15)
     env.store.tasks[tid].due = FakeDue(datetime(2026, 1, 20).date())
@@ -364,9 +364,8 @@ def test_body_change_on_todoist_propagates_to_reminders(env):
 def test_differently_named_containers_are_opened_on_their_own_side(env, monkeypatch):
     from todoist_sync import sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "REMINDERS_LIST", "Chores")
-    monkeypatch.setattr(sync_tasks, "TODOIST_PROJECT", "Family Project")
-    monkeypatch.setattr(sync_tasks, "CREATE_TODOIST_PROJECT", False)
+    env.channel.reminders = "Chores"
+    env.channel.todoist = "Family Project"
 
     env.run()
 
@@ -414,7 +413,7 @@ def test_dry_run_logs_what_it_would_do(env, caplog):
 
     assert "DRY RUN: would create Todoist task 'Mow the lawn'" in caplog.text
     assert "DRY RUN: would create reminder 'Buy paint'" in caplog.text
-    assert "DRY RUN: Sync complete: 1 reminder(s) -> Todoist, 1 task(s) -> Reminders" in caplog.text
+    assert "DRY RUN: Sync complete (Test List ↔ Test List): 1 reminder(s) -> Todoist, 1 task(s) -> Reminders" in caplog.text
 
 
 def test_reminder_already_completed_when_first_seen_is_not_copied(env):
@@ -476,7 +475,7 @@ def _open_pairs(env, count, completed=False):
 def test_task_gone_from_todoist_deletes_its_reminder_once_confirmed(env, monkeypatch):
     import todoist_sync.sync_tasks as sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 2)
+    env.channel.prune_after_checks = 2
     [(rid, tid)] = _open_pairs(env, 1)
     del env.store.tasks[tid]
 
@@ -491,7 +490,7 @@ def test_task_gone_from_todoist_deletes_its_reminder_once_confirmed(env, monkeyp
 def test_reminder_gone_from_its_list_deletes_its_task_once_confirmed(env, monkeypatch):
     import todoist_sync.sync_tasks as sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 2)
+    env.channel.prune_after_checks = 2
     [(rid, tid)] = _open_pairs(env, 1)
     del env.store.reminders[rid]
 
@@ -508,7 +507,7 @@ def test_more_open_removals_than_the_limit_raise_and_delete_nothing(env, monkeyp
 
     import todoist_sync.sync_tasks as sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 1)
+    env.channel.prune_after_checks = 1
     monkeypatch.setattr(sync_tasks, "_MAX_OPEN_DELETES_PER_RUN", 2)
     for rid, _ in _open_pairs(env, 3):
         del env.store.reminders[rid]
@@ -522,7 +521,7 @@ def test_more_open_removals_than_the_limit_raise_and_delete_nothing(env, monkeyp
 def test_completed_items_do_not_count_toward_the_mass_delete_limit(env, monkeypatch):
     import todoist_sync.sync_tasks as sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 1)
+    env.channel.prune_after_checks = 1
     monkeypatch.setattr(sync_tasks, "_MAX_OPEN_DELETES_PER_RUN", 2)
     for rid, _ in _open_pairs(env, 3, completed=True):
         del env.store.reminders[rid]
@@ -535,7 +534,7 @@ def test_completed_items_do_not_count_toward_the_mass_delete_limit(env, monkeypa
 def test_dry_run_only_logs_the_deletion(env, monkeypatch, caplog):
     import todoist_sync.sync_tasks as sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 1)
+    env.channel.prune_after_checks = 1
     [(rid, tid)] = _open_pairs(env, 1)
     del env.store.tasks[tid]
 
@@ -549,7 +548,7 @@ def test_dry_run_only_logs_the_deletion(env, monkeypatch, caplog):
 def test_mirrored_deletion_is_logged_with_its_title(env, monkeypatch, caplog):
     import todoist_sync.sync_tasks as sync_tasks
 
-    monkeypatch.setattr(sync_tasks, "PRUNE_MISSING_AFTER_CHECKS", 1)
+    env.channel.prune_after_checks = 1
     [(rid, _)] = _open_pairs(env, 1)
     del env.store.reminders[rid]
 
@@ -630,3 +629,21 @@ def test_section_conflict_is_won_by_reminders_by_default(env):
 
     assert env.store.tasks[tid].section_id == "Now"
     assert env.store.reminders[rid]["section"] == "Now"
+
+
+def test_a_channel_with_sections_off_leaves_columns_alone_on_both_sides(env):
+    env.channel.sections = False
+    rid = env.store.add_reminder(name="Onions", section="Produce")
+    tid = env.store.add_task(content="Milk", section="Doing")
+
+    env.run()
+    created_task = next(t for t in env.store.tasks.values() if t.content == "Onions")
+    created_reminder = next(r for r in env.store.reminders.values() if r["name"] == "Milk")
+    assert created_task.section_id is None
+    assert created_reminder["section"] is None
+
+    env.store.tasks[created_task.id].section_id = "Later"
+    env.run()
+
+    assert env.store.reminders[rid]["section"] == "Produce"
+    assert env.store.tasks[tid].section_id == "Doing"

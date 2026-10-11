@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 from todoist_sync import sync_tasks
+from todoist_sync.channels import Channel
 
 
 def _http_error(status: int) -> httpx.HTTPStatusError:
@@ -13,18 +14,20 @@ def _http_error(status: int) -> httpx.HTTPStatusError:
 
 @pytest.fixture
 def runner(tmp_path, monkeypatch):
-    """run() with main() scripted: each call pops the next outcome
-    (an exception to raise, or None for a clean sync)."""
+    """run() over one channel, with main() scripted: each call pops the
+    next outcome (an exception to raise, or None for a clean sync)."""
 
     class Runner:
         breaker = tmp_path / "circuit-breaker-open"
         outcomes: list = []
         main_calls: list = []
+        channels_synced: list = []
         sleeps: list = []
         alarms: list = []
 
-    def fake_main(dry_run=False):
+    def fake_main(channel, dry_run=False):
         Runner.main_calls.append(dry_run)
+        Runner.channels_synced.append(channel.reminders)
         outcome = Runner.outcomes.pop(0) if Runner.outcomes else None
         if outcome is not None:
             raise outcome
@@ -35,6 +38,8 @@ def runner(tmp_path, monkeypatch):
 
     monkeypatch.setattr(sync_tasks, "ENVIRONMENT", "test")
     monkeypatch.setattr(sync_tasks, "main", fake_main)
+    monkeypatch.setattr(sync_tasks, "CHANNELS", [Channel("Chores", "Family Project")])
+    monkeypatch.setattr(sync_tasks.config, "validate", lambda: None)
     monkeypatch.setattr(sync_tasks, "BREAKER_PATH", Runner.breaker)
     monkeypatch.setattr(sync_tasks, "_acquire_lock", FakeLock)
     monkeypatch.setattr(sync_tasks, "_sleep", Runner.sleeps.append)
@@ -117,3 +122,43 @@ def test_refuses_to_run_outside_an_environment(runner, monkeypatch):
     assert sync_tasks.run([]) == 2
     assert runner.main_calls == []
     assert not runner.breaker.exists()
+
+
+def test_every_channel_syncs_in_one_run(runner, monkeypatch):
+    monkeypatch.setattr(sync_tasks, "CHANNELS", [Channel("Chores", "Family Project"), Channel("Shopping", "Shopping")])
+
+    assert sync_tasks.run([]) == 0
+    assert runner.channels_synced == ["Chores", "Shopping"]
+
+
+def test_a_channel_that_keeps_failing_transiently_doesnt_hold_up_the_others(runner, monkeypatch):
+    monkeypatch.setattr(sync_tasks, "CHANNELS", [Channel("Chores", "Family Project"), Channel("Shopping", "Shopping")])
+    runner.outcomes = [httpx.ConnectError("offline")] * (len(sync_tasks._RETRY_DELAYS) + 1)
+
+    assert sync_tasks.run([]) == 1
+    assert runner.channels_synced[-1] == "Shopping"
+    assert not runner.breaker.exists()
+
+
+def test_an_unexpected_error_in_one_channel_stops_the_run_and_trips_the_breaker(runner, monkeypatch):
+    monkeypatch.setattr(sync_tasks, "CHANNELS", [Channel("Chores", "Family Project"), Channel("Shopping", "Shopping")])
+    runner.outcomes = [ValueError("boom")]
+
+    with pytest.raises(ValueError):
+        sync_tasks.run([])
+
+    assert runner.channels_synced == ["Chores"]
+    assert runner.breaker.exists()
+
+
+def test_a_bad_config_trips_the_breaker(runner, monkeypatch):
+    def invalid():
+        raise ValueError("config.toml: no channels")
+
+    monkeypatch.setattr(sync_tasks.config, "validate", invalid)
+
+    with pytest.raises(ValueError):
+        sync_tasks.run([])
+
+    assert runner.main_calls == []
+    assert runner.breaker.exists()
