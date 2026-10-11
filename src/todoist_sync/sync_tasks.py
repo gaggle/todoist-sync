@@ -141,7 +141,7 @@ def _trip_breaker(exc: Exception) -> None:
 
 
 def _acquire_lock():
-    """Prevents overlapping runs: the 15-minute timer and the wake-watcher
+    """Prevents overlapping runs: the 5-minute timer and the wake-watcher
     are separate launchd jobs that can both invoke this script around the
     same time (e.g. the Mac wakes right as the timer also fires). Without
     this, two processes could read the same state.json, both create a task

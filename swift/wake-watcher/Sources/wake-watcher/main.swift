@@ -16,7 +16,7 @@ let syncJobLabel = CommandLine.arguments[1]
 // the sync target instead of guessing a fixed delay: fire as soon as it
 // resolves, but give up and sync anyway after postWakeMaxWaitSeconds so a
 // slow/failed reconnect doesn't delay sync indefinitely — that case just
-// fails and self-heals on the next 15-minute timer run.
+// fails and self-heals on the next timer run.
 //
 // SCNetworkReachability was tried first but rejected: its .reachable flag
 // only reflects "a local network route exists" (interface up), not

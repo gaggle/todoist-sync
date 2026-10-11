@@ -57,9 +57,8 @@ _KEYCHAIN_SERVICE = "todoist-sync"
 _KEYCHAIN_ACCOUNT = "default"
 
 # Absolute path, not a bare "security" resolved through $PATH. launchd runs
-# this with a safe default $PATH, but a manual run via the ~/.local/bin
-# symlink inherits the user's — and install.sh --ensurepath deliberately
-# prepends that user-writable directory ahead of /usr/bin. A file named
+# this with a safe default $PATH, but a manual run inherits the user's,
+# which may put a user-writable directory ahead of /usr/bin. A file named
 # "security" landing there would otherwise intercept the token read.
 _SECURITY_BIN = "/usr/bin/security"
 

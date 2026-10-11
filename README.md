@@ -13,7 +13,7 @@ turned out to clutter every synced item's notes field.
   run. Only items in these containers are ever touched. The name is set by
   `SYNC_LIST_NAME` in `config.env` — change it there if you want something
   else; the rest of this doc just uses the default.
-- Pairings are tracked in a local state file (`var/state.json`), mapping
+- Pairings are tracked in a local state file (`state.json` in the environment's data folder), mapping
   each reminder's native id directly to its Todoist task id. Nothing is
   written into notes/descriptions to identify a pairing — those fields stay
   exactly as you typed them.
@@ -37,7 +37,7 @@ turned out to clutter every synced item's notes field.
      syncing it instead of creating a duplicate.
   4. Mirrors removals: once a reminder or task has been gone from its
      container for `SYNC_PRUNE_MISSING_AFTER_CHECKS` consecutive runs (4 by
-     default — about an hour at the 15-minute sync interval), whether
+     default — about 20 minutes at prod's 5-minute sync interval), whether
      deleted or moved to another list/project, its counterpart is deleted
      from the other side and the pair is dropped from `state.json`. If more
      than 3 *open* items vanish from one side in the same run, nothing is
@@ -58,14 +58,14 @@ Transient failures — offline, timeouts, Todoist rate limiting or server
 errors — are retried within the run (after 10s, then 60s) and otherwise
 left to the next scheduled run. Anything else (a bug, a revoked token,
 lost Reminders access, a mass removal) **opens the circuit breaker**: the
-error and traceback go to `var/sync.log`, the reason is written to
-`var/circuit-breaker-open`, a Mac notification appears, and a
+error and traceback go to the log, the reason is written to
+`circuit-breaker-open` in the environment's data folder, a Mac notification appears, and a
 high-priority reminder lands in your default Reminders list so the phone
 hears about it too. Every run after that just logs a warning and stops,
 until you've looked, fixed the cause, and removed the file:
 
 ```bash
-rm var/circuit-breaker-open
+rm ~/"Library/Application Support/Todoist Sync/prod/circuit-breaker-open"
 ```
 
 `--dry-run` ignores the breaker (it writes nothing), which makes it the
@@ -115,8 +115,8 @@ tool for seeing what tripped it.
 src/todoist_sync/          Python package — Todoist API, sync logic, state, CLI entry point
 swift/reminders-bridge/    Swift/EventKit helper the Python side shells out to for all Reminders access
 swift/wake-watcher/        Swift/NSWorkspace helper that fires a sync shortly after the Mac wakes
-deploy/                    launchd LaunchAgents, wrapper script, installer
-var/                       generated at runtime — state.json, sync.log
+deploy/                    env.sh (builds an environment), Info.plist and LaunchAgent templates
+integration_tests/         end-to-end scenarios against the real "Sync Test" pair, run as the staging app
 ```
 
 ## Environments (this fork)
@@ -154,128 +154,29 @@ Prod deploys a tagged version — every VERSION bump is tagged — and rolls
 back by deploying an earlier tag. Running the
 sync without an environment (straight from a checkout) is refused.
 
-The Setup and Scheduling sections below describe upstream's `install.sh`,
-which this fork has gated off while its launchd setup is reworked.
+## Logs
 
-## Setup
+Each environment logs to its own rotating file (1 MB cap, 3 backups) in
+`~/Library/Logs/Todoist Sync/`, which Console.app lists under Log Reports.
+At `SYNC_LOG_LEVEL=INFO` (prod) a run logs a "starting" line and a one-line
+summary; `DEBUG` (staging) adds every Reminders and Todoist call and the
+reasoning behind each decision. Each line carries its level, so
+`grep ERROR prod.log` pulls out just the failures. A run started from a
+terminal also mirrors the log to the console.
 
-```bash
-./deploy/install.sh
-```
-
-`deploy/install.sh` creates `.venv` if needed, installs the Python
-dependencies, builds the Swift helpers, and loads the LaunchAgents. It
-requires Xcode Command Line Tools for the Swift build (`xcode-select
---install` if `swift --version` doesn't work). Get a Todoist API token
-from Todoist -> Settings -> Integrations -> Developer first.
-
-No manual `config.env` editing needed: on first run (no `config.env` yet),
-the installer prompts interactively for the API token (stored in macOS
-Keychain, not the file) and every other setting — list name, conflict
-winner, archive/prune thresholds, log level — writing them into a fresh
-`config.env` for you. Re-run `./deploy/install.sh --setup` any time later
-to revisit those same prompts (each shows its current value as the
-default; press Enter to keep it). Hand-editing `config.env` directly still
-works too, if you'd rather do that.
-
-If you're upgrading from a version that kept `TODOIST_API_KEY` in
-`config.env`, the installer moves it into the Keychain and removes the
-plaintext line from the file, replacing it with a comment. Retrieve the
-token afterwards with `security find-generic-password -s todoist-sync -a
-default -w`.
-
-The first run will prompt macOS for Reminders access — grant it in
-System Settings > Privacy & Security > Reminders.
-
-## Running
-
-The installer symlinks a `todoist-sync` command onto `~/.local/bin` (and
-prints a note if that's not already on your PATH), so a manual run from
-anywhere is just:
-
-```bash
-todoist-sync
-```
-
-Equivalent, if you'd rather not rely on PATH:
-
-```bash
-./.venv/bin/python -m todoist_sync.sync_tasks
-```
-
-## Scheduling
-
-Scheduled via a launchd LaunchAgent rather than cron, since both EventKit
-and the Todoist client need to run in the logged-in user session. It runs
-every 15 minutes and logs to `var/sync.log` — a rotating log (1 MB cap, 3
-backups kept, ~4 MB max) written directly by the script itself, not via
-launchd's raw stdout/stderr redirection — so it won't grow unbounded.
-Running the script manually in a terminal also mirrors the same log
-records live to the console (launchd itself never sees this — its plist
-sets no `StandardOutPath`/`StandardErrorPath` — so a scheduled run is
-unaffected); `tail -f var/sync.log` still works too. Each line carries its
-level (`INFO`/`WARNING`/`ERROR`), so `grep ERROR var/sync.log` reproduces
-just the failures/tracebacks — safe to share when reporting an issue,
-since it won't also pull in routine sync history.
-
-By default (`SYNC_LOG_LEVEL=INFO` in `config.env`) each run logs just a
-"starting" line and a one-line summary (`Sync complete: no changes`, or a
-breakdown if anything actually synced). Set `SYNC_LOG_LEVEL=DEBUG` to
-temporarily add per-query/per-pair detail — every Reminders/Todoist API
-call, which value won a conflict and why, and which specific pair was
-archived or pruned — useful when troubleshooting, noisy to leave on
-permanently.
-
-The two LaunchAgents (the 15-minute timer and the wake-watcher, see below)
-both point into `deploy/todoist-sync.app`, a minimal `.app` bundle
-containing two executables — the sync wrapper script and the wake-watcher
-binary — that share one bundle identity. Wrapping them (rather than
-pointing launchd at the venv's Python binary and the bare Swift binary
-directly) means macOS's Login Items list and the Reminders-access
-permission prompt both consistently show "Todoist Sync" — it's the process
-that actually reads/writes Reminders (via the reminders-bridge subprocess
-it launches), so it's the one macOS should ask permission for. Notably,
-wake-watcher itself never touches Reminders: rather than syncing directly,
-it asks launchd to run the timer job on demand (`launchctl start`), so
-launchd — not wake-watcher — is the parent of that run either way, and both
-trigger paths get identical, correct attribution.
-
-This bundle and the compiled Swift binaries are ad-hoc code-signed
-(`codesign -s -`) to clear the "unidentified developer" warning macOS shows
-for unsigned executables running as background items; that's a local-only
-signature, not tied to an Apple Developer ID, and needs re-running after
-any edit (the installer does this automatically, and rebuilding does mean
-macOS will ask you to re-approve Reminders access once).
-
-```bash
-./deploy/install.sh              # first run: interactive setup, then build, sign, install, and load
-./deploy/install.sh --setup      # revisit the interactive settings prompts, then reinstall
-./deploy/install.sh --upgrade    # pull latest code, update deps, then build/sign/install/load
-./deploy/install.sh --uninstall  # unload and remove
-```
-
-Resolves paths automatically, so it works regardless of where the repo is
-cloned or which user runs it. Creates `.venv` and `config.env` itself if
-they don't exist yet (see Setup, above). Safe to re-run. `--upgrade`
-refuses to run if there are uncommitted local changes, so it can't clobber
-in-progress edits.
+The agents' own stderr goes to `<env>.launchd.log` next to it: one line
+per wake from the wake-watcher, and any crash that happens before the sync
+has set up its log.
 
 ### Sleep and wake
 
 launchd's `StartInterval` timer doesn't fire while the Mac is asleep, and
-its wake catch-up isn't prompt — it can be several minutes after wake before
-a missed run fires. To close that gap, the installer also builds and loads
-a second, always-running LaunchAgent, `wake-watcher`
-(`swift/wake-watcher/`), which observes `NSWorkspace.didWakeNotification`.
-Firing a sync immediately on wake reliably races Wi-Fi reassociation, so
-rather than guessing a fixed delay, it polls actual DNS resolution of
-`api.todoist.com` (`getaddrinfo`) once a second and fires as soon as that
-resolves — typically much faster than a fixed delay when the network's
-already up, capped at 30 seconds so a slow/failed reconnect doesn't block
-it forever (that case just fails and self-heals on the next 15-minute
-timer run). Rather than spawning the sync itself, it asks launchd to run
-the timer job on demand (`launchctl start com.todoist-sync.local`) — see
-the bundling note above for why that matters. It runs alongside the
-15-minute timer rather than replacing it, has no external dependency (no
-Homebrew, no third-party app), and is uninstalled/reinstalled together
-with the main agent by `deploy/install.sh`.
+its catch-up after a wake isn't prompt. The wake-watcher
+(`swift/wake-watcher/`, inside the app bundle) closes that gap: it observes
+`NSWorkspace.didWakeNotification`, then polls DNS resolution of
+`api.todoist.com` once a second, since syncing straight away races Wi-Fi
+reassociation. As soon as it resolves (or after 30 seconds at most) it
+asks launchd to run the sync job (`launchctl kickstart`), rather than
+spawning the sync itself, so launchd is the parent of every run and the
+Reminders permission is always attributed to the app. It never passes
+`-k`, so a sync already in flight is left alone.
