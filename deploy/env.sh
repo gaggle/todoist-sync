@@ -51,8 +51,19 @@ DOMAIN="gui/$(id -u)"
 SYNC_LABEL="com.todoist-sync.$ENV.sync"
 WAKE_LABEL="com.todoist-sync.$ENV.wake-watcher"
 command -v swift >/dev/null || { echo "error: swift not found — xcode-select --install" >&2; exit 1; }
-SIGN_ID="${TODOIST_SYNC_SIGN_IDENTITY:-$(security find-identity -v -p codesigning | awk -F'"' '/"Apple Development: /{print $2; exit}')}"
-[ -n "$SIGN_ID" ] || { echo "error: no Apple Development signing identity — add your Apple ID in Xcode > Settings > Accounts, or set TODOIST_SYNC_SIGN_IDENTITY" >&2; exit 1; }
+# The first Apple Development identity Gatekeeper doesn't call revoked —
+# find-identity -v can list a revoked one as valid, and macOS kills what it
+# signs. By fingerprint: a renewed certificate keeps the revoked one's name,
+# which makes signing by name ambiguous.
+pick_identity() {
+    security find-identity -v -p codesigning | awk '/"Apple Development: /{print $2}' | while read -r hash; do
+        probe="$(mktemp -d)/probe"; cp /usr/bin/true "$probe"
+        codesign -s "$hash" --force "$probe" 2>/dev/null && codesign --verify --strict "$probe" 2>/dev/null \
+            && ! spctl -a -t exec "$probe" 2>&1 | grep -q REVOKED && { echo "$hash"; break; }
+    done
+}
+SIGN_ID="${TODOIST_SYNC_SIGN_IDENTITY:-$(pick_identity || true)}"
+[ -n "$SIGN_ID" ] || { echo "error: no valid Apple Development signing identity — add one in Xcode > Settings > Accounts > Manage Certificates, or set TODOIST_SYNC_SIGN_IDENTITY" >&2; exit 1; }
 
 mkdir -p "$DATA" "$(dirname "$LOG")" "$HOME/Applications"
 chmod 700 "$DATA"
